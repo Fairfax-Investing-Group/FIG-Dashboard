@@ -1,0 +1,289 @@
+[
+  {
+    "taxonomy": "us-gaap",
+    "concept": "Revenues",
+    "field": "revenue",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "SalesRevenueNet",
+    "field": "revenue",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "field": "revenue",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "RevenueFromContractWithCustomerIncludingAssessedTax",
+    "field": "revenue",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CostOfRevenue",
+    "field": "cost_of_revenue",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CostOfGoodsAndServicesSold",
+    "field": "cost_of_revenue",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "OperatingIncomeLoss",
+    "field": "operating_income",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "field": "pretax_income",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "IncomeTaxExpenseBenefit",
+    "field": "income_tax_expense",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "ProfitLoss",
+    "field": "net_income_including_noncontrolling_interest",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "NetIncomeLossAvailableToCommonStockholdersBasic",
+    "field": "net_income_common",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "InterestExpense",
+    "field": "interest_expense",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "InterestAndDebtExpense",
+    "field": "interest_expense",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "EarningsPerShareBasic",
+    "field": "basic_eps",
+    "period_type": "duration",
+    "unit_kind": "per_share"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "EarningsPerShareDiluted",
+    "field": "diluted_eps",
+    "period_type": "duration",
+    "unit_kind": "per_share"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "WeightedAverageNumberOfSharesOutstandingBasic",
+    "field": "weighted_average_basic_shares",
+    "period_type": "duration",
+    "unit_kind": "shares"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "field": "weighted_average_diluted_shares",
+    "period_type": "duration",
+    "unit_kind": "shares"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "NetCashProvidedByUsedInOperatingActivities",
+    "field": "operating_cash_flow",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "PaymentsToAcquirePropertyPlantAndEquipment",
+    "field": "capital_expenditures",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CommonStockDividendsPerShareDeclared",
+    "field": "dividends_per_share_declared",
+    "period_type": "duration",
+    "unit_kind": "per_share"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CommonStockDividendsPerShareCashPaid",
+    "field": "dividends_per_share",
+    "period_type": "duration",
+    "unit_kind": "per_share"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "PaymentsOfDividends",
+    "field": "cash_dividends_paid",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "PaymentsOfDividendsCommonStock",
+    "field": "cash_common_dividends_paid",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CommonStockSharesOutstanding",
+    "field": "period_end_common_shares",
+    "period_type": "instant",
+    "unit_kind": "shares"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CashAndCashEquivalentsAtCarryingValue",
+    "field": "cash_and_cash_equivalents",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "ShortTermInvestments",
+    "field": "short_term_investments",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "AccountsReceivableNetCurrent",
+    "field": "accounts_receivable",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "InventoryNet",
+    "field": "inventory",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "AssetsCurrent",
+    "field": "current_assets",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "LiabilitiesCurrent",
+    "field": "current_liabilities",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "Assets",
+    "field": "total_assets",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "Goodwill",
+    "field": "goodwill",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CommonStockholdersEquity",
+    "field": "common_stock_equity",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "StockholdersEquity",
+    "field": "total_stockholders_equity",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "PreferredStockValue",
+    "field": "preferred_equity",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "ShortTermBorrowings",
+    "field": "short_term_debt",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "LongTermDebtNoncurrent",
+    "field": "long_term_debt",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "PreferredStockSharesOutstanding",
+    "field": "preferred_shares",
+    "period_type": "instant",
+    "unit_kind": "shares"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "NetIncomeLoss",
+    "field": "net_income",
+    "period_type": "duration",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "LongTermDebtCurrent",
+    "field": "current_maturities_long_term_debt",
+    "period_type": "instant",
+    "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "CommercialPaper",
+    "field": "commercial_paper",
+    "period_type": "instant",
+    "unit_kind": "money"
+  }
+]

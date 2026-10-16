@@ -42,9 +42,12 @@ class Settings:
 
     @classmethod
     def env(cls):
-        return cls(Path(os.getenv("FINANCIAL_DATA_DIR", "data")).resolve(),
-                   os.getenv("FINANCIAL_STORAGE", "local"), os.getenv("SEC_USER_AGENT", ""),
-                   int(os.getenv("FINANCIAL_STORAGE_LIMIT_BYTES", "9000000000")))
+        return cls(
+            Path(os.getenv("FINANCIAL_DATA_DIR", "data")).resolve(),
+            os.getenv("FINANCIAL_STORAGE", "local"),
+            os.getenv("SEC_USER_AGENT", ""),
+            int(os.getenv("FINANCIAL_STORAGE_LIMIT_BYTES", "9000000000")),
+        )
 
     def __post_init__(self):
         if self.storage not in {"local", "r2"}:
@@ -54,4 +57,3 @@ class Settings:
 
 class Blocked(RuntimeError):
     """An external prerequisite is unavailable; never invent a replacement."""
-

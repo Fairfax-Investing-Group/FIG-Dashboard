@@ -135,8 +135,7 @@ def acquire_filing(raw, fetcher, filing):
     # extraction, so prefer the actual inline document when it is inline XBRL.
     primary_ref = get_source(raw, fetcher, base + primary, "filing-document", meta)
     primary_data = raw.read(primary_ref)
-    root = xml_root(primary_data)
-    is_inline = any("inlineXBRL" in uri for uri in root.nsmap.values() if uri)
+    is_inline = b"inlineXBRL" in primary_data
     if is_inline:
         entry = base + primary
         seeds = {entry: primary_ref}

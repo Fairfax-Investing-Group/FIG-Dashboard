@@ -28,13 +28,17 @@ class Fetcher:
             for attempt in range(5):
                 time.sleep(max(0, 0.22 - (time.monotonic() - self.last)))
                 self.last = time.monotonic()
-                response = self.client.request(method, url, json=payload,
-                                               headers={"User-Agent": self.user_agent or "Fairfax financial research"})
+                response = self.client.request(
+                    method,
+                    url,
+                    json=payload,
+                    headers={"User-Agent": self.user_agent or "Fairfax financial research"},
+                )
                 if response.status_code == 403:
                     raise Blocked(f"Source refused access (403): {url}; no bypass attempted")
                 if response.status_code in {429, 500, 502, 503, 504}:
                     wait = response.headers.get("Retry-After", "")
-                    time.sleep(min(float(wait) if wait.isdigit() else 2 ** attempt, 60))
+                    time.sleep(min(float(wait) if wait.isdigit() else 2**attempt, 60))
                     continue
                 response.raise_for_status()
                 break

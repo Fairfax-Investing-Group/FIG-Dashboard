@@ -23,7 +23,7 @@ financial = "fairfax_financial.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-fairfax_financial = ["mappings.json"]
+fairfax_financial = ["mappings.json", "_vendor/sec_transform/*.md", "_vendor/sec_transform/LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -31,6 +31,7 @@ markers = ["integration: real filing acquisition (requires SEC_USER_AGENT and ne
 
 [tool.ruff]
 line-length = 110
+extend-exclude = ["src/fairfax_financial/_vendor"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
