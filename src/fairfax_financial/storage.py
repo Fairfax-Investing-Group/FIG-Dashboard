@@ -15,6 +15,8 @@ class Objects:
 
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._receipt_cache = None
+        self._usage = None
         self.root = settings.root / "raw"
         self.root.mkdir(exist_ok=True)
         self.client = None
@@ -23,7 +25,9 @@ class Objects:
             if any(not os.getenv(n) for n in required):
                 raise Blocked("R2 requires " + ", ".join(required))
             self.client = boto3.client(
-                "s3", endpoint_url=os.environ["R2_ENDPOINT"], region_name="auto",
+                "s3",
+                endpoint_url=os.environ["R2_ENDPOINT"],
+                region_name="auto",
                 aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
                 aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
             )
@@ -31,11 +35,16 @@ class Objects:
 
     def keys(self, prefix=""):
         if self.client:
-            for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefix):
+            for page in self.client.get_paginator("list_objects_v2").paginate(
+                Bucket=self.bucket, Prefix=prefix
+            ):
                 yield from (o["Key"] for o in page.get("Contents", []))
         else:
-            yield from sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")
-                              if p.is_file() and p.relative_to(self.root).as_posix().startswith(prefix))
+            yield from sorted(
+                p.relative_to(self.root).as_posix()
+                for p in self.root.rglob("*")
+                if p.is_file() and p.relative_to(self.root).as_posix().startswith(prefix)
+            )
 
     def get(self, path):
         if self.client:
@@ -53,13 +62,17 @@ class Objects:
                 return False
             raise
 
-    def usage(self):
+    def usage(self, refresh=False):
+        if self._usage is not None and not refresh:
+            return self._usage
         if not self.client:
-            return sum(p.stat().st_size for p in self.settings.root.rglob("*") if p.is_file())
+            self._usage = sum(p.stat().st_size for p in self.settings.root.rglob("*") if p.is_file())
+            return self._usage
         total = 0
         for bucket in [self.bucket, os.getenv("R2_LAKE_BUCKET", "financial-lake")]:
             for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=bucket):
                 total += sum(o["Size"] for o in page.get("Contents", []))
+        self._usage = total
         return total
 
     def put(self, path, data):
@@ -68,8 +81,10 @@ class Objects:
                 raise ValueError("Immutable object collision: " + path)
             return
         if self.usage() + len(data) > self.settings.limit_bytes:
-            raise Blocked(f"Storage guard: projected at least {self.usage() + len(data)} bytes; "
-                          "inspect storage report before explicitly raising FINANCIAL_STORAGE_LIMIT_BYTES")
+            raise Blocked(
+                f"Storage guard: projected at least {self.usage() + len(data)} bytes; "
+                "inspect storage report before explicitly raising FINANCIAL_STORAGE_LIMIT_BYTES"
+            )
         if self.client:
             self.client.put_object(Bucket=self.bucket, Key=path, Body=data, IfNoneMatch="*")
         else:
@@ -78,6 +93,7 @@ class Objects:
             # One writer enforced by CLI lock; exclusive create also protects immutability.
             with dest.open("xb") as f:
                 f.write(data)
+        self._usage = (self._usage or 0) + len(data)
 
     def save(self, data: bytes, url: str, kind: str, metadata=None, collected_at=None):
         sha = digest(data)
@@ -88,10 +104,20 @@ class Objects:
         receipt_path = f"receipts/{kind}/{rid}.json"
         if self.exists(receipt_path):
             return json.loads(self.get(receipt_path))
-        receipt = dict(id=rid, source_url=url, source_hash=sha, storage_path=path,
-                       size=len(data), stored_size=len(self.get(path)), collected_at=collected_at or now(),
-                       kind=kind, metadata=meta)
+        receipt = dict(
+            id=rid,
+            source_url=url,
+            source_hash=sha,
+            storage_path=path,
+            size=len(data),
+            stored_size=len(self.get(path)),
+            collected_at=collected_at or now(),
+            kind=kind,
+            metadata=meta,
+        )
         self.put(receipt_path, canonical(receipt).encode())
+        if self._receipt_cache is not None:
+            self._receipt_cache.append(receipt)
         return receipt
 
     def read(self, receipt):
@@ -101,12 +127,17 @@ class Objects:
         return data
 
     def receipts(self, kind=""):
-        prefix = f"receipts/{kind}/" if kind else "receipts/"
-        return [json.loads(self.get(p)) for p in self.keys(prefix)]
+        if self._receipt_cache is None:
+            self._receipt_cache = [json.loads(self.get(p)) for p in self.keys("receipts/")]
+        return [r for r in self._receipt_cache if not kind or r["kind"] == kind]
 
     def record(self, kind, payload, identity=None):
-        return self.save(canonical(payload).encode(), "internal:acquisition-record", kind,
-                         {"identity": identity or key(payload)})
+        return self.save(
+            canonical(payload).encode(),
+            "internal:acquisition-record",
+            kind,
+            {"identity": identity or key(payload)},
+        )
 
     def payloads(self, kind):
         return [(r, json.loads(self.read(r))) for r in self.receipts(kind)]
