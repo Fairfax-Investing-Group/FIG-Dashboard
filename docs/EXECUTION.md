@@ -7,7 +7,7 @@ with measured final results before the final push.
 - Real pilot: four acquired/parsed filings; 15,615 original facts. The Exxon
   historical issuer is separately identified, not merged with current XOM.
 - Initial Company Facts comparison: 2,617 comparisons, zero mismatches.
-- Offline automated suite: 10 tests passed, including actual deletion and
+- Offline automated suite: 15 tests passed, including standalone 2017 XBRL and actual deletion and
   reconstruction of all Silver/Gold tables and idempotent reruns.
 - Full current-universe ten-year discovery is in progress. No full acquisition
   or complete financial backfill is claimed.

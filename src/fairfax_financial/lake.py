@@ -7,10 +7,10 @@ import pyarrow as pa
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError
 from pyiceberg.expressions import AlwaysTrue, EqualTo
-from pyiceberg.io.pyarrow import _pyarrow_to_schema_without_ids
 from pyiceberg.partitioning import PartitionField, PartitionSpec
-from pyiceberg.schema import assign_fresh_schema_ids
+from pyiceberg.schema import Schema
 from pyiceberg.transforms import BucketTransform
+from pyiceberg.types import BooleanType, LongType, NestedField, StringType
 
 from .core import Blocked, Settings
 from .schema import SCHEMAS
@@ -19,6 +19,8 @@ from .schema import SCHEMAS
 class Lake:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.objects = None
+        self._writes = 0
         if settings.storage == "local":
             self.catalog = load_catalog(
                 "financial",
@@ -59,8 +61,26 @@ class Lake:
                 pass
         for name, schema in SCHEMAS.items():
             if self.catalog.table_exists(name):
+                existing = self.catalog.load_table(name)
+                if set(schema.names) - {f.name for f in existing.schema().fields}:
+                    with existing.update_schema() as update:
+                        update.union_by_name(schema)
                 continue
-            iceberg = assign_fresh_schema_ids(_pyarrow_to_schema_without_ids(schema))
+            iceberg = Schema(
+                *(
+                    NestedField(
+                        i,
+                        f.name,
+                        BooleanType()
+                        if pa.types.is_boolean(f.type)
+                        else LongType()
+                        if pa.types.is_int64(f.type)
+                        else StringType(),
+                        required=False,
+                    )
+                    for i, f in enumerate(schema, 1)
+                )
+            )
             partitions = PartitionSpec()
             if name in {
                 "silver.financial_facts",
@@ -96,6 +116,7 @@ class Lake:
         df = pl.from_arrow(table)
         if df["id"].null_count() or df["id"].n_unique() != df.height:
             raise ValueError("Duplicate/null deterministic keys in " + name)
+        self.guard(table)
         # PyIceberg compares all columns and does not commit unchanged data.
         self.catalog.load_table(name).upsert(table, join_cols=["id"])
 
@@ -108,9 +129,31 @@ class Lake:
             return sorted(xs, key=lambda r: r["id"])
 
         incoming = pa.Table.from_pylist(rows, schema=SCHEMAS[name])
+        ids = pl.from_arrow(incoming)["id"]
+        if ids.null_count() or ids.n_unique() != len(ids):
+            raise ValueError("Duplicate/null deterministic keys in " + name)
         if sort(previous) == sort(incoming.to_pylist()):
             return
-        self.catalog.load_table(name).overwrite(incoming, overwrite_filter=condition)
+        self.guard(incoming)
+        if not previous:
+            self.catalog.load_table(name).append(incoming)
+        else:
+            self.catalog.load_table(name).overwrite(incoming, overwrite_filter=condition)
+
+    def guard(self, incoming):
+        if self.objects is None:
+            return
+        # Conservative reservation for Parquet and Iceberg metadata; periodically
+        # reconcile with physical inventory (which includes obsolete snapshots).
+        current = self.objects.usage(refresh=self._writes % 100 == 0)
+        reserve = incoming.nbytes * 2 + 131072
+        if current + reserve > self.settings.limit_bytes:
+            raise Blocked(
+                f"Lake storage guard: projected up to {current + reserve:,} bytes, "
+                f"limit {self.settings.limit_bytes:,}; review physical inventory and budget"
+            )
+        self.objects._usage = current + reserve
+        self._writes += 1
 
     def reset(self):
         """Drop registered derived tables only. Raw is in a separate store and is never touched."""

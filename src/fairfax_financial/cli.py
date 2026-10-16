@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import shutil
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -65,8 +66,14 @@ def selected_ciks(p, ciks):
     snapshots = p.lake.rows("silver.universe_snapshots")
     if not snapshots:
         raise Blocked("No raw universe: run bootstrap-universe first")
-    latest = max(r["snapshot_date"] for r in snapshots)
-    members = {r["company_id"] for r in snapshots if r["snapshot_date"] == latest}
+    latest = max(
+        snapshots, key=lambda r: (r["snapshot_date"], r.get("collected_at") or "", r.get("snapshot_id") or "")
+    )
+    members = {
+        r["company_id"]
+        for r in snapshots
+        if r.get("snapshot_id") == latest.get("snapshot_id") and r["snapshot_date"] == latest["snapshot_date"]
+    }
     available = {r["cik"] for r in p.lake.rows("silver.companies") if r["id"] in members}
     requested = {str(int(c)).zfill(10) for c in ciks} if ciks else available
     if requested - available:
@@ -77,6 +84,8 @@ def selected_ciks(p, ciks):
 
 
 def bootstrap(p, ciks, since, until, discover_only=False, refresh=False):
+    if date.fromisoformat(since) > date.fromisoformat(until):
+        raise ValueError("since must be no later than until")
     selected = selected_ciks(p, ciks)
     h = Fetcher(p.settings.user_agent)
     result = dict(
@@ -131,10 +140,18 @@ def bootstrap(p, ciks, since, until, discover_only=False, refresh=False):
                 usage = p.raw.usage(refresh=True)
                 # Lake estimate is measured from pilot tables, including metadata,
                 # not an invented financial value. Actual accounting remains separate.
+                pilot_tables = [
+                    "silver.financial_facts",
+                    "silver.relationships",
+                    "gold.annual_reported_facts",
+                    "gold.quarterly_reported_facts",
+                ]
                 pilot_lake = sum(
-                    x.stat().st_size for x in (p.settings.root / "lake").rglob("*") if x.is_file()
+                    task.file.file_size_in_bytes
+                    for name in pilot_tables
+                    for task in p.lake.catalog.load_table(name).scan().plan_files()
                 )
-                per_filing_lake = pilot_lake / len(bundles)
+                per_filing_lake = pilot_lake / len(bundles) + 65536
                 projected = int(usage + max(0, len(filings) - len(known)) * (mean + per_filing_lake))
                 result["storage_projection"] = dict(
                     current_bytes=usage,
@@ -143,8 +160,18 @@ def bootstrap(p, ciks, since, until, discover_only=False, refresh=False):
                     mean_filing_raw_bytes=int(mean),
                     mean_filing_lake_bytes=int(per_filing_lake),
                     limit_bytes=p.settings.limit_bytes,
-                    method="pilot mean raw filing + measured local lake bytes; not a storage guarantee",
+                    method="pilot mean raw filing + active financial Parquet bytes + 64 KiB/file metadata reserve; not a guarantee",
                 )
+                if p.settings.storage == "local":
+                    free = shutil.disk_usage(p.settings.root).free
+                    result["storage_projection"]["available_local_bytes"] = free
+                    if projected - usage > max(0, free - 1_073_741_824):
+                        raise Blocked(
+                            f"Insufficient local capacity: full backfill projects {projected:,} total bytes "
+                            f"({projected - usage:,} additional) with {free:,} bytes free. "
+                            "Provide R2/Basin credentials and sufficient storage, or move FINANCIAL_DATA_DIR "
+                            "to a larger volume. No full acquisition was started."
+                        )
                 if projected > p.settings.limit_bytes:
                     raise Blocked(
                         f"Full backfill projects {projected:,} bytes from {len(bundles)} pilot filings "
@@ -289,12 +316,12 @@ def update(as_of: str = date.today().isoformat()):
         p.silver()
         # Metadata refresh covers the full rolling window but cached history and
         # filing bundles are reused. No daily bulk archives or historical rebuilds.
-        before = {r["accession_number"] for r in p.lake.rows("silver.parse_runs")}
+        before = {r["id"] for r in p.lake.rows("silver.parse_runs")}
         bootstrap(p, None, cutoff(as_of), as_of, refresh=True)
         show(p.parse())
-        after = {r["accession_number"] for r in p.lake.rows("silver.parse_runs")}
-        show(p.gold(after - before))
-        show(validate_lake(p, after - before))
+        changed = {r["accession_number"] for r in p.lake.rows("silver.parse_runs") if r["id"] not in before}
+        show(p.gold(changed))
+        show(validate_lake(p, changed))
 
 
 @app.command("storage-report")

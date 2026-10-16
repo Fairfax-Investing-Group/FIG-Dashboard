@@ -285,5 +285,12 @@
     "field": "commercial_paper",
     "period_type": "instant",
     "unit_kind": "money"
+  },
+  {
+    "taxonomy": "us-gaap",
+    "concept": "PreferredStockDividendsIncomeStatementImpact",
+    "field": "preferred_dividends",
+    "period_type": "duration",
+    "unit_kind": "money"
   }
 ]

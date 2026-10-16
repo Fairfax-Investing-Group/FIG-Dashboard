@@ -18,6 +18,7 @@ class Pipeline:
         self.settings = settings
         self.raw = Objects(settings)
         self.lake = Lake(settings)
+        self.lake.objects = self.raw
         self.lake.initialize()
 
     def silver(self):
@@ -29,7 +30,13 @@ class Pipeline:
         self.lake.upsert("silver.companies", list(companies.values()))
         self.lake.upsert("silver.securities", securities)
         self.lake.upsert("silver.universe_snapshots", snapshots)
-        self.lake.upsert("silver.filings", [f for _, f in self.raw.payloads("filing")])
+        # The same accession can occur in multiple refreshed metadata snapshots.
+        # Keep the newest source metadata row; original snapshots remain in Raw.
+        filing_versions = sorted(
+            self.raw.payloads("filing"), key=lambda rf: (rf[0]["collected_at"], rf[0]["id"])
+        )
+        filings = {f["id"]: f for _, f in filing_versions}
+        self.lake.upsert("silver.filings", list(filings.values()))
         self.lake.upsert("silver.concept_mappings", configuration()[1])
         flags.extend(p for _, p in self.raw.payloads("issue"))
         for code, details in [
@@ -81,6 +88,7 @@ class Pipeline:
                 facts, rels, flags = parse(self.raw, bundle, configuration()[0])
                 # Validation exceptions indicate an incomplete parser run. Quarantine,
                 # never publish a partially validated filing as successful.
+                self.lake.upsert("silver.data_quality_flags", flags)
                 if any("exception:" in r["details"] for r in flags):
                     raise ValueError("Arelle validation exception; see parser diagnostic")
                 self.lake.replace("silver.financial_facts", facts, "accession_number", accession)
@@ -109,7 +117,10 @@ class Pipeline:
 
     def gold(self, accessions=None):
         self.lake.upsert("gold.company_metadata", self.lake.rows("silver.companies"))
-        filings = self.lake.rows("silver.filings")
+        successful = {
+            r["accession_number"] for r in self.lake.rows("silver.parse_runs") if r["status"] == "success"
+        }
+        filings = [f for f in self.lake.rows("silver.filings") if f["accession_number"] in successful]
         result = dict(annual=0, quarterly=0, conflicts=0)
         for filing in filings:
             accession = filing["accession_number"]

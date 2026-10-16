@@ -12,13 +12,14 @@ def semantic_digest(pipeline):
 def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
     p = real_pipeline
     result = p.rebuild()
-    assert result["parse"] == dict(parsed=4, skipped=0, failed=0)
+    assert result["parse"] == dict(parsed=5, skipped=0, failed=0)
     facts = p.lake.rows("silver.financial_facts")
     assert len(facts) > 10_000
     assert all(f["source_url"].startswith("https://www.sec.gov/Archives/") for f in facts)
     assert all(f["source_hash"] and f["context_id"] and f["fact_path"] for f in facts)
     assert all(f["is_valid"] for f in facts)
     assert any(f["scale"] is not None for f in facts)
+    assert any(f["source_document"].endswith(".xml") for f in facts)
     assert any(f["dimensions"] != "{}" for f in facts)
     assert any(f["taxonomy"] not in {"us-gaap", "dei", "srt"} for f in facts)
     assert {f["form"] for f in facts} == {"10-K", "10-Q"}
@@ -54,7 +55,7 @@ def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
         for n in SCHEMAS
         if p.lake.catalog.load_table(n).current_snapshot()
     }
-    assert p.parse() == dict(parsed=0, skipped=4, failed=0)
+    assert p.parse() == dict(parsed=0, skipped=5, failed=0)
     p.gold()
     validate(p)
     assert semantic_digest(p) == first

@@ -102,7 +102,9 @@ SCHEMAS = {
         "source_id",
         "as_of_date",
     ),
-    "silver.universe_snapshots": strings("id", "snapshot_date", "security_id", "company_id", "source_id"),
+    "silver.universe_snapshots": strings(
+        "id", "snapshot_date", "security_id", "company_id", "source_id", "snapshot_id", "collected_at"
+    ),
     "silver.filings": strings(
         "id",
         "company_id",

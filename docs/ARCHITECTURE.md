@@ -41,7 +41,8 @@ There is no proxy rotation or access bypass. Retry-After/backoff is respected.
 - `companies`: CIK-derived UUIDv5 issuer identities and sourced metadata.
 - `securities`: issue identities, current symbols and explicit source type, with
   unresolved identity/classification coverage flags.
-- `universe_snapshots`: dated security membership (not just unique issuers).
+- `universe_snapshots`: dated security membership (not just unique issuers), with snapshot identity
+  and collection time so same-day refreshes do not blend old/new membership.
 - `filings`: accession identity, form, report date, filing date and exact SEC
   acceptance timestamp when available. Originals and amendments coexist.
 - `financial_facts`: each original concept, namespace, source lexical and
@@ -120,7 +121,7 @@ conservative; missing canonical fields are a coverage limitation, not zero.
 Iceberg v2 tables use Zstandard Parquet; large fact tables bucket issuer IDs
 into 32 partitions. Filing-scoped atomic replacements remove obsolete
 normalization results without rewriting every issuer. Deterministic fact IDs
-include accession, original source hash and original element path. Repeating
+include accession, original source hash and original positional element path (without long-concept-name truncation). Repeating
 unchanged upserts does not create snapshots. Immutable raw receipts, not a
 mutable local job state file, supply restart/rebuild inputs.
 

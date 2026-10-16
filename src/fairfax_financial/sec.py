@@ -16,13 +16,17 @@ LINK = "http://www.xbrl.org/2003/linkbase"
 
 
 def issue(raw, code, error, *, cik=None, accession=None, source_id=None, severity="error"):
+    try:
+        detail = str(error)
+    except Exception:
+        detail = type(error).__name__
     payload = dict(
         code=code,
         severity=severity,
         company_id=company_id(cik) if cik else None,
         accession_number=accession,
         fact_id=None,
-        details=str(error)[:4000],
+        details=detail[:4000],
         source_id=source_id,
     )
     payload["id"] = key(payload)
@@ -188,7 +192,7 @@ def acquire_filing(raw, fetcher, filing):
 
 def metadata(raw):
     companies = {}
-    for ref, data in raw.payloads("submissions"):
+    for ref, data in sorted(raw.payloads("submissions"), key=lambda rp: (rp[0]["collected_at"], rp[0]["id"])):
         cik = str(data["cik"]).zfill(10)
         cid = company_id(cik)
         row = dict(

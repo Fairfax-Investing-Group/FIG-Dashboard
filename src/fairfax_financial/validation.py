@@ -41,7 +41,10 @@ def validate(pipeline, accessions=None):
             add("duplicate_key", name)
     receipts = {r["source_hash"] for r in raw.receipts()}
     mappings = {m["id"] for m in lake.rows("silver.concept_mappings")}
+    successful = {r["accession_number"] for r in lake.rows("silver.parse_runs") if r["status"] == "success"}
     for filing in lake.rows("silver.filings"):
+        if filing["accession_number"] not in successful:
+            continue
         accession = filing["accession_number"]
         if accessions is not None and accession not in accessions:
             continue

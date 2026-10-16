@@ -16,7 +16,7 @@ from ._vendor.sec_transform import loadSECtransforms
 from .core import canonical, key
 from .sec import LINK, XLINK, XSD, XSI, xml_root
 
-PARSER_VERSION = "fairfax-2/sec-4891c4c/arelle-" + importlib.metadata.version("arelle-release")
+PARSER_VERSION = "fairfax-3/sec-4891c4c/arelle-" + importlib.metadata.version("arelle-release")
 
 
 def taxonomy(namespace):
@@ -125,13 +125,24 @@ def parse(raw, bundle, normalization_version):
             if any(len(v) > 1 for v in focus.values()):
                 fy, fp = None, None
                 flag("ambiguous_fiscal_focus", focus)
+            positional_paths = {}
+            for document in model.urlDocs.values():
+                root = document.xmlRootElement
+                if root is None:
+                    continue
+                stack = [(root, "/*[1]")]
+                while stack:
+                    node, path = stack.pop()
+                    positional_paths[node] = path
+                    children = [child for child in node.iterchildren() if isinstance(child.tag, str)]
+                    stack.extend((child, f"{path}/*[{i}]") for i, child in enumerate(children, 1))
             for fact in sorted(model.factsInInstance, key=lambda f: f.objectIndex):
                 source_file = str(Path(fact.modelDocument.filepath))
                 if source_file not in reverse:
                     raise ValueError("Fact origin is outside retained raw source graph: " + source_file)
                 url, receipt = reverse[source_file]
                 context = fact.context
-                fact_path = fact.getroottree().getpath(fact)
+                fact_path = positional_paths[fact]
                 fid = key(filing["cik"], accession, receipt["source_hash"], fact_path)
                 valid = fact.xValid >= VALID and context is not None and fact.concept is not None
                 numeric = fact.isNumeric
@@ -247,6 +258,13 @@ def parse(raw, bundle, normalization_version):
                     )
                     row["id"] = key(row)
                     relationships.append(row)
+        except Exception as error:
+            # Format while Arelle objects still exist; closing clears their attributes.
+            try:
+                detail = str(error)
+            except Exception:
+                detail = type(error).__name__
+            raise ValueError(f"XBRL parse failed: {type(error).__name__}: {detail}") from None
         finally:
             manager.close()
             cntlr.close()

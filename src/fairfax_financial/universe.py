@@ -20,6 +20,7 @@ def symbol(value):
 def acquire(raw, fetcher, snapshot_date=None):
     day = snapshot_date or date.today().isoformat()
     pages = []
+    sources = []
     total = None
     page = 1
     while total is None or len(pages) < total:
@@ -32,7 +33,8 @@ def acquire(raw, fetcher, snapshot_date=None):
             filterToken="",
         )
         data = fetcher.fetch(NYSE_URL, method="POST", payload=payload)
-        raw.save(data, NYSE_URL, "nyse-directory", {"date": day, "request": payload})
+        receipt = raw.save(data, NYSE_URL, "nyse-directory", {"date": day, "request": payload})
+        sources.append(receipt["id"])
         rows = json.loads(data)
         if not rows:
             raise ValueError("NYSE directory truncated/empty; universe not published")
@@ -47,7 +49,6 @@ def acquire(raw, fetcher, snapshot_date=None):
     # It supplies preferred/fund/warrant coverage absent from the EQUITY directory.
     other = raw.save(fetcher.fetch(OTHER_LISTED), OTHER_LISTED, "other-listed", {"date": day})
     tickers = raw.save(fetcher.fetch(SEC_TICKERS), SEC_TICKERS, "sec-tickers", {"date": day})
-    sources = [r["id"] for r in raw.receipts("nyse-directory") if r["metadata"]["date"] == day]
     raw.record("universe-bundle", dict(date=day, nyse=sources, other=other["id"], tickers=tickers["id"]))
     return build(raw)
 
@@ -56,8 +57,10 @@ def build(raw, aliases=()):
     receipts = {r["id"]: r for r in raw.receipts()}
     companies, securities, snapshots, flags = {}, {}, [], []
     alias_map = {(a["mic"], a["ticker"]): a for a in aliases}
-    bundles = sorted((p for _, p in raw.payloads("universe-bundle")), key=lambda p: p["date"])
-    for bundle in bundles:
+    bundles = sorted(
+        raw.payloads("universe-bundle"), key=lambda rp: (rp[1]["date"], rp[0]["collected_at"], rp[0]["id"])
+    )
+    for bundle_receipt, bundle in bundles:
         mapping = json.loads(raw.read(receipts[bundle["tickers"]]))
         cik_map = {}
         for values in mapping["data"]:
@@ -146,7 +149,9 @@ def build(raw, aliases=()):
                 )
             snapshots.append(
                 dict(
-                    id=key(bundle["date"], sid),
+                    id=key(bundle_receipt["id"], sid),
+                    snapshot_id=bundle_receipt["id"],
+                    collected_at=bundle_receipt["collected_at"],
                     snapshot_date=bundle["date"],
                     security_id=sid,
                     company_id=cid,

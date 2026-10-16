@@ -89,7 +89,7 @@ No Basin SQL integration is used. Remote credentials and a live catalog are
 required before remote integration can be verified.
 
 A 9,000,000,000-byte default guard protects raw writes; full backfills also
-project raw+lake growth from measured pilot files. Inventory includes historical
+project raw+lake growth from measured pilot files and check local free space. Inventory includes historical
 Iceberg data/metadata. Override `FINANCIAL_STORAGE_LIMIT_BYTES` only after
 reviewing the projection and storage capacity. The estimate is not a guarantee:
 pilot companies are not a representative statistical sample. Configure Basin
