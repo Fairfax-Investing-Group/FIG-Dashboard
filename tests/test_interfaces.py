@@ -105,3 +105,38 @@ def test_no_cloud_credentials_are_invented(tmp_path, monkeypatch):
         Objects(Settings(tmp_path, storage="r2"))
     with pytest.raises(Blocked, match="Basin requires"):
         Lake(Settings(tmp_path, storage="r2"))
+
+
+def test_long_retry_after_defers_batch_without_early_retry(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(429, headers={"Retry-After": "120"})
+
+    monkeypatch.setattr("fairfax_financial.http.time.sleep", lambda seconds: None)
+    h = Fetcher("", transport=httpx.MockTransport(handler))
+    with pytest.raises(Blocked, match="deferred without early retry"):
+        h.fetch("https://source.example/data")
+    with pytest.raises(Blocked, match="cooldown"):
+        h.fetch("https://source.example/other")
+    assert len(calls) == 1
+    h.close()
+
+
+def test_http_date_retry_after_is_honored(monkeypatch):
+    from email.utils import parsedate_to_datetime
+
+    deadline = "Fri, 16 Oct 2026 21:00:00 GMT"
+    monkeypatch.setattr(
+        "fairfax_financial.http.time.time", lambda: parsedate_to_datetime(deadline).timestamp() - 12
+    )
+    sleeps = []
+    monkeypatch.setattr("fairfax_financial.http.time.sleep", sleeps.append)
+    responses = iter(
+        [httpx.Response(429, headers={"Retry-After": deadline}), httpx.Response(200, content=b"source")]
+    )
+    h = Fetcher("", transport=httpx.MockTransport(lambda r: next(responses)))
+    assert h.fetch("https://source.example/data") == b"source"
+    assert 12 in sleeps
+    h.close()

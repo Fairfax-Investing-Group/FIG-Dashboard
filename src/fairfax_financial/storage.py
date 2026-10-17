@@ -3,6 +3,9 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
 
 import boto3
 from botocore.exceptions import ClientError
@@ -16,6 +19,8 @@ class Objects:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._receipt_cache = None
+        self._by_kind = {}
+        self._by_url = {}
         self._usage = None
         self.root = settings.root / "raw"
         self.root.mkdir(exist_ok=True)
@@ -90,9 +95,16 @@ class Objects:
         else:
             dest = self.root / path
             dest.parent.mkdir(parents=True, exist_ok=True)
-            # One writer enforced by CLI lock; exclusive create also protects immutability.
-            with dest.open("xb") as f:
-                f.write(data)
+            # Publish only complete bytes, even if interrupted during a write.
+            fd, temporary = tempfile.mkstemp(prefix=".raw-write-", dir=dest.parent)
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    output.write(data)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.link(temporary, dest)  # Atomic exclusive publication, never overwrites.
+            finally:
+                os.unlink(temporary)
         self._usage = (self._usage or 0) + len(data)
 
     def save(self, data: bytes, url: str, kind: str, metadata=None, collected_at=None):
@@ -113,11 +125,12 @@ class Objects:
             stored_size=len(self.get(path)),
             collected_at=collected_at or now(),
             kind=kind,
+            file_type=Path(urlparse(url).path).suffix.lower().lstrip(".") or kind,
             metadata=meta,
         )
         self.put(receipt_path, canonical(receipt).encode())
         if self._receipt_cache is not None:
-            self._receipt_cache.append(receipt)
+            self._index(receipt)
         return receipt
 
     def read(self, receipt):
@@ -126,10 +139,20 @@ class Objects:
             raise ValueError("Bronze hash mismatch: " + receipt["id"])
         return data
 
+    def _index(self, receipt):
+        self._receipt_cache.append(receipt)
+        self._by_kind.setdefault(receipt["kind"], []).append(receipt)
+        ident = (receipt["source_url"], receipt["kind"])
+        prior = self._by_url.get(ident)
+        if prior is None or (prior["collected_at"], prior["id"]) < (receipt["collected_at"], receipt["id"]):
+            self._by_url[ident] = receipt
+
     def receipts(self, kind=""):
         if self._receipt_cache is None:
-            self._receipt_cache = [json.loads(self.get(p)) for p in self.keys("receipts/")]
-        return [r for r in self._receipt_cache if not kind or r["kind"] == kind]
+            self._receipt_cache = []
+            for path in self.keys("receipts/"):
+                self._index(json.loads(self.get(path)))
+        return list(self._by_kind.get(kind, [])) if kind else list(self._receipt_cache)
 
     def record(self, kind, payload, identity=None):
         return self.save(
@@ -140,8 +163,9 @@ class Objects:
         )
 
     def payloads(self, kind):
-        return [(r, json.loads(self.read(r))) for r in self.receipts(kind)]
+        for receipt in self.receipts(kind):
+            yield receipt, json.loads(self.read(receipt))
 
     def cached(self, url, kind):
-        matches = [r for r in self.receipts(kind) if r["source_url"] == url]
-        return max(matches, key=lambda r: r["collected_at"]) if matches else None
+        self.receipts(kind)
+        return self._by_url.get((url, kind))

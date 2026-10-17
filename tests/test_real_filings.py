@@ -1,19 +1,51 @@
+from pyiceberg.expressions import And, EqualTo, NotEqualTo
+
 from fairfax_financial.core import key
-from fairfax_financial.normalize import configuration, normalize
+from fairfax_financial.normalize import INPUT_COLUMNS, configuration, normalize
 from fairfax_financial.numeric import consistent, precision_rank
 from fairfax_financial.schema import SCHEMAS
 from fairfax_financial.validation import company_facts, validate
 
 
+def table_digest(pipeline, name, where=None):
+    # Hash every column, one row at a time: no giant JSON/string copy of text blocks.
+    scan = pipeline.lake.catalog.load_table(name).scan(**({"row_filter": where} if where is not None else {}))
+    hashes = []
+    for batch in scan.to_arrow_batch_reader():
+        for offset in range(batch.num_rows):
+            row = batch.slice(offset, 1).to_pylist()[0]
+            hashes.append((row["id"], key(row)))
+    return key(sorted(hashes))
+
+
 def semantic_digest(pipeline):
-    return {name: key(sorted(pipeline.lake.rows(name), key=lambda r: r["id"])) for name in SCHEMAS}
+    return {name: table_digest(pipeline, name) for name in SCHEMAS}
 
 
 def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
     p = real_pipeline
     result = p.rebuild()
-    assert result["parse"] == dict(parsed=5, skipped=0, failed=0)
-    facts = p.lake.rows("silver.financial_facts")
+    assert result["parse"] == dict(parsed=7, skipped=0, failed=0)
+    facts = p.lake.rows(
+        "silver.financial_facts",
+        columns=(
+            "id",
+            "source_url",
+            "source_hash",
+            "context_id",
+            "fact_path",
+            "is_valid",
+            "scale",
+            "source_document",
+            "dimensions",
+            "taxonomy",
+            "form",
+            "instant_date",
+            "period_start",
+            "period_end",
+            "accession_number",
+        ),
+    )
     assert len(facts) > 10_000
     assert all(f["source_url"].startswith("https://www.sec.gov/Archives/") for f in facts)
     assert all(f["source_hash"] and f["context_id"] and f["fact_path"] for f in facts)
@@ -22,7 +54,7 @@ def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
     assert any(f["source_document"].endswith(".xml") for f in facts)
     assert any(f["dimensions"] != "{}" for f in facts)
     assert any(f["taxonomy"] not in {"us-gaap", "dei", "srt"} for f in facts)
-    assert {f["form"] for f in facts} == {"10-K", "10-Q"}
+    assert {f["form"] for f in facts} == {"10-K", "10-Q", "10-K/A"}
     assert any(f["instant_date"] for f in facts)
     assert any(f["period_start"] and f["period_end"] for f in facts)
     rels = p.lake.rows("silver.relationships")
@@ -30,6 +62,10 @@ def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
     assert any(r["arcrole"].endswith("summation-item") for r in rels)
     gold = p.lake.rows("gold.annual_reported_facts") + p.lake.rows("gold.quarterly_reported_facts")
     index = {f["id"]: f for f in facts}
+    for number in p.lake.rows(
+        "silver.financial_facts", EqualTo("is_numeric", True), columns=("id", "value", "unit")
+    ):
+        index[number["id"]].update(number)
     assert gold
     assert any(g["period_kind"] == "reported_six_month_ytd" for g in gold)
     for g in gold:
@@ -44,6 +80,10 @@ def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
             if f["accession_number"] == g["source_accession"]
         ):
             assert g["fiscal_year"] is None  # No fiscal focus copied to comparative periods.
+    coverage = [
+        r for r in p.lake.rows("silver.data_quality_flags") if r["code"] == "canonical_fields_unavailable"
+    ]
+    assert coverage and all(r["severity"] == "coverage" for r in coverage)
     assert p.lake.rows("gold.analyst_estimates") == []
     assert p.lake.rows("gold.ownership_snapshots") == []
     report = validate(p)
@@ -55,7 +95,7 @@ def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
         for n in SCHEMAS
         if p.lake.catalog.load_table(n).current_snapshot()
     }
-    assert p.parse() == dict(parsed=0, skipped=5, failed=0)
+    assert p.parse() == dict(parsed=0, skipped=7, failed=0)
     p.gold()
     validate(p)
     assert semantic_digest(p) == first
@@ -70,30 +110,30 @@ def test_offline_rebuild_idempotency_and_source_lineage(real_pipeline):
 
 def test_companyfacts_reference_only(real_pipeline):
     p = real_pipeline
-    if not p.lake.rows("silver.financial_facts"):
+    if not p.lake.rows("silver.financial_facts", columns=("id",)):
         p.rebuild()
 
     class NoNetwork:
         def fetch(self, *args, **kwargs):
             raise AssertionError("Fixture reference should run without network")
 
-    before = key(p.lake.rows("silver.financial_facts"))
-    ciks = sorted({f["cik"] for f in p.lake.rows("silver.financial_facts")})
+    before = table_digest(p, "silver.financial_facts")
+    ciks = sorted({f["cik"] for f in p.lake.rows("silver.financial_facts", columns=("cik",))})
     result = company_facts(p, NoNetwork(), ciks)
     assert result["compared"] > 2000
     assert result["mismatches"] == 0
-    assert key(p.lake.rows("silver.financial_facts")) == before
+    assert table_digest(p, "silver.financial_facts") == before
 
 
 def test_reported_rounding_does_not_create_derived_values(real_pipeline):
     p = real_pipeline
-    if not p.lake.rows("silver.financial_facts"):
+    if not p.lake.rows("silver.financial_facts", columns=("id",)):
         p.rebuild()
-    facts = [
-        f
-        for f in p.lake.rows("silver.financial_facts")
-        if f["concept"] == "Assets" and f["dimensions"] == "{}"
-    ]
+    facts = p.lake.rows(
+        "silver.financial_facts",
+        And(EqualTo("concept", "Assets"), EqualTo("dimensions", "{}")),
+        columns=INPUT_COLUMNS,
+    )
     groups = {}
     for f in facts:
         groups.setdefault((f["accession_number"], f["instant_date"], f["unit"]), []).append(f)
@@ -110,17 +150,20 @@ def test_reported_rounding_does_not_create_derived_values(real_pipeline):
     assert found
 
 
-def test_amendment_identity_is_preserved(real_raw):
-    filings = [f for _, f in real_raw.payloads("filing")]
-    amendments = [f for f in filings if f["form"].endswith("/A")]
-    assert amendments
-    for amendment in amendments:
-        assert any(
-            f["cik"] == amendment["cik"]
-            and f["accession_number"] != amendment["accession_number"]
-            and not f["form"].endswith("/A")
-            for f in filings
-        )
+def test_amendment_identity_is_preserved(real_pipeline):
+    p = real_pipeline
+    filings = p.lake.rows("silver.filings")
+    amendment = next(f for f in filings if f["accession_number"] == "0000726728-19-000041")
+    original = next(f for f in filings if f["accession_number"] == "0000726728-19-000038")
+    assert amendment["cik"] == original["cik"]
+    assert amendment["report_date"] == original["report_date"] == "2018-12-31"
+    assert original["accepted_at"] < amendment["accepted_at"]
+    assert original["id"] != amendment["id"]
+    facts = p.lake.rows("silver.financial_facts", columns=("accession_number",))
+    gold = p.lake.rows("gold.annual_reported_facts")
+    for filing in [original, amendment]:
+        assert any(f["accession_number"] == filing["accession_number"] for f in facts)
+        assert any(g["source_accession"] == filing["accession_number"] for g in gold)
 
 
 def test_source_only_mapping_configuration():
@@ -139,3 +182,43 @@ def test_source_only_mapping_configuration():
     keys = [(r["taxonomy"], r["concept"]) for r in rules]
     assert len(keys) == len(set(keys))
     assert all(r["period_type"] in {"instant", "duration"} for r in rules)
+
+
+def test_incremental_arrival_parses_only_new_real_filing(fixture_root, tmp_path):
+    import shutil
+
+    from fairfax_financial.core import Settings
+    from fairfax_financial.pipeline import Pipeline
+    from fairfax_financial.storage import Objects
+
+    original = Objects(Settings(fixture_root))
+    new_ref, new_bundle = next(
+        (r, b)
+        for r, b in original.payloads("filing-bundle")
+        if b["filing"]["accession_number"] == "0000019617-17-000314"
+    )
+    raw_root = tmp_path / "raw"
+    shutil.copytree(fixture_root / "raw", raw_root)
+    (raw_root / "receipts" / "filing-bundle" / f"{new_ref['id']}.json").unlink()
+    pipeline = Pipeline(Settings(tmp_path))
+    pipeline.silver()
+    assert pipeline.parse() == dict(parsed=6, skipped=0, failed=0)
+    pipeline.gold()
+    before_facts = table_digest(pipeline, "silver.financial_facts")
+    before_gold = pipeline.lake.rows("gold.annual_reported_facts") + pipeline.lake.rows(
+        "gold.quarterly_reported_facts"
+    )
+    pipeline.raw.save(original.read(new_ref), new_ref["source_url"], new_ref["kind"], new_ref["metadata"])
+    assert pipeline.parse() == dict(parsed=1, skipped=6, failed=0)
+    accession = new_bundle["filing"]["accession_number"]
+    pipeline.gold({accession})
+    old_facts = table_digest(pipeline, "silver.financial_facts", NotEqualTo("accession_number", accession))
+    old_gold = [
+        r
+        for n in ["gold.annual_reported_facts", "gold.quarterly_reported_facts"]
+        for r in pipeline.lake.rows(n)
+        if r["source_accession"] != accession
+    ]
+    assert old_facts == before_facts
+    assert key(sorted(old_gold, key=lambda r: r["id"])) == key(sorted(before_gold, key=lambda r: r["id"]))
+    assert validate(pipeline, {accession})["new_validation_issues"] == 0

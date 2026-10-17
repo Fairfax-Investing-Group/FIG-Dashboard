@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
-from pyiceberg.expressions import EqualTo
+from pyiceberg.expressions import And, EqualTo
 
 from . import sec, universe
 from .core import canonical, key
 from .lake import Lake
-from .normalize import configuration, normalize
+from .normalize import INPUT_COLUMNS, configuration, normalize
 from .parser import PARSER_VERSION, parse
 from .storage import Objects
 
@@ -64,6 +65,11 @@ class Pipeline:
                     "collected_at",
                 ]
             }
+            row["file_type"] = (
+                r.get("file_type")
+                or Path(urlparse(r["source_url"]).path).suffix.lower().lstrip(".")
+                or r["kind"]
+            )
             row.update(
                 cik=r["metadata"].get("cik"),
                 accession_number=r["metadata"].get("accession_number"),
@@ -91,7 +97,13 @@ class Pipeline:
                 self.lake.upsert("silver.data_quality_flags", flags)
                 if any("exception:" in r["details"] for r in flags):
                     raise ValueError("Arelle validation exception; see parser diagnostic")
-                self.lake.replace("silver.financial_facts", facts, "accession_number", accession)
+                self.lake.replace(
+                    "silver.financial_facts",
+                    facts,
+                    "accession_number",
+                    accession,
+                    bundle["filing"]["company_id"],
+                )
                 self.lake.replace("silver.relationships", rels, "accession_number", accession)
                 self.lake.upsert("silver.data_quality_flags", flags)
                 self.lake.upsert(
@@ -126,16 +138,51 @@ class Pipeline:
             accession = filing["accession_number"]
             if accessions is not None and accession not in accessions:
                 continue
-            facts = self.lake.rows("silver.financial_facts", EqualTo("accession_number", accession))
+            facts = self.lake.rows(
+                "silver.financial_facts",
+                And(
+                    And(EqualTo("accession_number", accession), EqualTo("company_id", filing["company_id"])),
+                    EqualTo("is_numeric", True),
+                ),
+                columns=INPUT_COLUMNS,
+            )
             if not facts:
                 continue
             annual, quarterly, flags = normalize(facts)
-            self.lake.replace("gold.annual_reported_facts", annual, "source_accession", accession)
-            self.lake.replace("gold.quarterly_reported_facts", quarterly, "source_accession", accession)
+            self.lake.replace(
+                "gold.annual_reported_facts", annual, "source_accession", accession, filing["company_id"]
+            )
+            self.lake.replace(
+                "gold.quarterly_reported_facts",
+                quarterly,
+                "source_accession",
+                accession,
+                filing["company_id"],
+            )
+            present = {r["field"] for r in annual + quarterly}
+            missing = sorted({r["field"] for r in configuration()[1]} - present)
+            if missing:
+                coverage = dict(
+                    code="canonical_fields_unavailable",
+                    severity="coverage",
+                    company_id=filing["company_id"],
+                    accession_number=accession,
+                    fact_id=None,
+                    source_id=filing["source_id"],
+                    details=canonical(
+                        dict(
+                            fields=missing,
+                            reason="No canonical whole-entity source value in this filing; may be inapplicable or unmapped",
+                            normalization_version=configuration()[0],
+                        )
+                    ),
+                )
+                coverage["id"] = key(coverage)
+                flags.append(coverage)
             self.lake.upsert("silver.data_quality_flags", flags)
             result["annual"] += len(annual)
             result["quarterly"] += len(quarterly)
-            result["conflicts"] += len(flags)
+            result["conflicts"] += sum(r["severity"] == "error" for r in flags)
         self.external()
         return result
 

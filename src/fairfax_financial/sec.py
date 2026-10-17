@@ -192,7 +192,8 @@ def acquire_filing(raw, fetcher, filing):
 
 def metadata(raw):
     companies = {}
-    for ref, data in sorted(raw.payloads("submissions"), key=lambda rp: (rp[0]["collected_at"], rp[0]["id"])):
+    for ref in sorted(raw.receipts("submissions"), key=lambda r: (r["collected_at"], r["id"])):
+        data = json.loads(raw.read(ref))
         cik = str(data["cik"]).zfill(10)
         cid = company_id(cik)
         row = dict(

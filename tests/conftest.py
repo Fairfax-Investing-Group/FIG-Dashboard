@@ -15,7 +15,8 @@ def fixture_root(tmp_path_factory):
     (root / "raw").mkdir()
     with tarfile.open(Path(__file__).parent / "fixtures/sec-pilot.tar.gz") as archive:
         archive.extractall(root / "raw", filter="data")
-    return root
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
@@ -27,4 +28,11 @@ def real_raw(fixture_root):
 def real_pipeline(fixture_root, tmp_path_factory):
     root = tmp_path_factory.mktemp("rebuild")
     shutil.copytree(fixture_root / "raw", root / "raw")
-    return Pipeline(Settings(root))
+    yield Pipeline(Settings(root))
+    shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def cleanup_test_directory(tmp_path):
+    yield
+    shutil.rmtree(tmp_path, ignore_errors=True)

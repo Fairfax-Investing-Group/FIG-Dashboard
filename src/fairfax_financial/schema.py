@@ -190,3 +190,7 @@ SCHEMAS = {
     ),
 }
 SCHEMAS = {name: pa.schema(cols) for name, cols in SCHEMAS.items()}
+
+SCHEMAS["silver.source_manifest"] = SCHEMAS["silver.source_manifest"].append(
+    pa.field("file_type", pa.large_string())
+)

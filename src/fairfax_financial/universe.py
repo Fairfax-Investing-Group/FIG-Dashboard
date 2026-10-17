@@ -4,9 +4,10 @@ import csv
 import io
 import json
 import re
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from .core import canonical, company_id, key, security_id
+from .core import Blocked, canonical, company_id, key, security_id
 
 NYSE_URL = "https://www.nyse.com/api/quotes/filter"
 SEC_TICKERS = "https://www.sec.gov/files/company_tickers_exchange.json"
@@ -18,7 +19,12 @@ def symbol(value):
 
 
 def acquire(raw, fetcher, snapshot_date=None):
-    day = snapshot_date or date.today().isoformat()
+    today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    day = snapshot_date or today
+    if day != today:
+        raise Blocked(
+            "The live listing directory cannot supply a historical/future universe snapshot; use today or retained Raw"
+        )
     pages = []
     sources = []
     total = None

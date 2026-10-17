@@ -8,11 +8,38 @@ from importlib.resources import files
 from .core import canonical, key
 from .numeric import consistent, precision_rank
 
+# The canonical layer uses numeric facts only; large prose/text blocks remain
+# losslessly stored in Silver and are never hydrated for numerical normalization.
+INPUT_COLUMNS = (
+    "id",
+    "company_id",
+    "cik",
+    "accession_number",
+    "taxonomy",
+    "concept",
+    "value",
+    "unit",
+    "is_numeric",
+    "is_valid",
+    "is_nil",
+    "dimensions",
+    "period_start",
+    "period_end",
+    "instant_date",
+    "fiscal_year",
+    "fiscal_period",
+    "form",
+    "filed_at",
+    "accepted_at",
+    "decimals",
+    "precision",
+)
+
 
 def configuration():
     data = files("fairfax_financial").joinpath("mappings.json").read_text()
     rules = json.loads(data)
-    version = "1/" + key(rules)[:16]
+    version = "2/" + key(rules)[:16]
     rows = []
     for rule in rules:
         rows.append(
@@ -32,6 +59,8 @@ def period_kind(fact):
     if not fact["period_start"] or not fact["period_end"]:
         return None
     days = (date.fromisoformat(fact["period_end"]) - date.fromisoformat(fact["period_start"])).days + 1
+    if days <= 0:
+        return None
     # Shape labels do not assign fiscal years or infer standalone quarters.
     for label, lo, hi in [
         ("reported_quarter", 70, 110),
@@ -68,6 +97,16 @@ def normalize(facts):
         if not rule or not f["is_numeric"] or not f["is_valid"] or f["is_nil"] or f["dimensions"] != "{}":
             continue
         kind = period_kind(f)
+        if kind is None:
+            flag("malformed_canonical_period", [(f, rule, kind)], "Missing or reversed period")
+            continue
+        if (f["period_end"] or f["instant_date"]) > f["filed_at"]:
+            flag(
+                "future_context_excluded",
+                [(f, rule, kind)],
+                "Future disclosure is not a historical reported statement fact",
+            )
+            continue
         if bool(f["instant_date"]) != (rule["period_type"] == "instant"):
             flag("mapping_period_mismatch", [(f, rule, kind)], rule["id"])
             continue

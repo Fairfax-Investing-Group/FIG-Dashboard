@@ -61,3 +61,42 @@ does not duplicate rows. A corrected export or later snapshot produces another
 version rather than overwriting prior information. Rebuild uses these originals.
 The importer cannot verify a third party's claimed license; operators must
 provide actual lawful source material. No vendor scraping is implemented.
+
+## Resume from retained local Raw on R2
+
+Create the two dedicated buckets and enable Basin on `financial-lake`. Configure
+all R2/Basin environment variables from `.env.example`. Stop other writers while
+copying; transfer both objects and receipts using the immutable adapter:
+
+```sh
+export FINANCIAL_STORAGE=r2
+# Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, BASIN_CATALOG_URI,
+# BASIN_WAREHOUSE and BASIN_TOKEN to the actual provisioned credentials/settings.
+.venv/bin/python - <<'PY'
+from pathlib import Path
+from fairfax_financial.core import Settings
+from fairfax_financial.storage import Objects
+source = Objects(Settings(Path('data').resolve(), storage='local'))
+target = Objects(Settings.env())
+assert target.client is not None, 'Configure R2 before copying'
+for path in source.keys():
+    if path.startswith(('objects/', 'receipts/')):
+        target.put(path, source.get(path))
+PY
+.venv/bin/financial rebuild
+# Review the measured projection and provision sufficient capacity, then set
+# FINANCIAL_STORAGE_LIMIT_BYTES accordingly before starting the full backfill.
+.venv/bin/financial backfill --until 2026-10-16
+.venv/bin/financial validate --companyfacts
+.venv/bin/financial storage-report
+```
+
+The adapter refuses differing bytes at an existing immutable key. Investigate
+any collision rather than overwriting it. This transfer is **not executed** in
+the current environment because the remote credentials are unavailable.
+
+Alternatively, copy only the retained `data/raw/` directory into a fresh data
+root on a volume with sufficient space, set `FINANCIAL_DATA_DIR` to that new
+absolute root, run `rebuild`, review/set the storage guard, and resume `backfill`.
+Keep the original Raw copy until verification passes. Do not reuse the moved
+local catalog/lake metadata: they contain absolute paths to the previous volume.

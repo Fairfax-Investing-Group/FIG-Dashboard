@@ -8,7 +8,6 @@ from datetime import date
 from pathlib import Path
 
 import typer
-from pyiceberg.expressions import EqualTo
 
 from . import sec, universe
 from .core import Blocked, Settings, now
@@ -269,10 +268,13 @@ def validate(companyfacts: bool = False, cik: list[str] = typer.Option(None)):
             h = Fetcher(p.settings.user_agent)
             try:
                 # Only issuers with parsed facts; no Company Facts bootstrap.
+                successful = {
+                    r["accession_number"]
+                    for r in p.lake.rows("silver.parse_runs")
+                    if r["status"] == "success"
+                }
                 available = {
-                    f["cik"]
-                    for f in p.lake.rows("silver.filings")
-                    if p.lake.rows("silver.parse_runs", EqualTo("accession_number", f["accession_number"]))
+                    f["cik"] for f in p.lake.rows("silver.filings") if f["accession_number"] in successful
                 }
                 chosen = [str(int(c)).zfill(10) for c in cik] if cik else sorted(available)
                 result["companyfacts"] = company_facts(p, h, chosen, refresh=True)

@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 import polars as pl
-from pyiceberg.expressions import EqualTo
+from pyiceberg.expressions import And, EqualTo
 
 from . import sec
 from .core import canonical, key
@@ -48,7 +48,41 @@ def validate(pipeline, accessions=None):
         accession = filing["accession_number"]
         if accessions is not None and accession not in accessions:
             continue
-        facts = lake.rows("silver.financial_facts", EqualTo("accession_number", accession))
+        scope = And(EqualTo("accession_number", accession), EqualTo("company_id", filing["company_id"]))
+        columns = (
+            "id",
+            "company_id",
+            "cik",
+            "accession_number",
+            "source_url",
+            "source_hash",
+            "context_id",
+            "namespace",
+            "fact_path",
+            "period_start",
+            "period_end",
+            "instant_date",
+            "filed_at",
+            "scale",
+            "is_numeric",
+            "is_nil",
+            "is_valid",
+            "unit",
+            "concept",
+            "dimensions",
+            "xml_lang",
+            "decimals",
+            "precision",
+        )
+        facts = lake.rows("silver.financial_facts", scope, columns=columns)
+        values = {
+            r["id"]: r["value"]
+            for r in lake.rows(
+                "silver.financial_facts", And(scope, EqualTo("is_numeric", True)), columns=("id", "value")
+            )
+        }
+        for fact in facts:
+            fact["value"] = values.get(fact["id"])
         index = {f["id"]: f for f in facts}
         conflicts = {}
         for f in facts:
@@ -70,6 +104,12 @@ def validate(pipeline, accessions=None):
                     add("unusual_duration", start + ".." + end, f, "diagnostic")
             except (ValueError, TypeError):
                 add("impossible_date", canonical([f["period_start"], f["period_end"], f["instant_date"]]), f)
+            if f["scale"] is not None:
+                try:
+                    if abs(int(f["scale"])) > 18:
+                        add("unusual_scale", f["scale"], f, "diagnostic")
+                except ValueError:
+                    add("invalid_scale", f["scale"], f)
             if f["is_numeric"] and not f["is_nil"] and f["is_valid"]:
                 if not f["unit"]:
                     add("invalid_unit", "No unit", f)
@@ -88,7 +128,10 @@ def validate(pipeline, accessions=None):
             if not consistent(group):
                 add("conflicting_source_facts", canonical([f["id"] for f in group]), group[0])
         for table in ["gold.annual_reported_facts", "gold.quarterly_reported_facts"]:
-            for g in lake.rows(table, EqualTo("source_accession", accession)):
+            for g in lake.rows(
+                table,
+                And(EqualTo("source_accession", accession), EqualTo("company_id", filing["company_id"])),
+            ):
                 original = index.get(g["source_fact_id"])
                 if not original or original["value"] != g["value"] or original["unit"] != g["unit"]:
                     add("gold_lineage_mismatch", g["id"])
@@ -108,7 +151,26 @@ def company_facts(pipeline, fetcher, ciks, refresh=False):
         url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json"
         ref = sec.get_source(pipeline.raw, fetcher, url, "companyfacts-validation", {"cik": cik}, refresh)
         data = json.loads(pipeline.raw.read(ref))
-        facts = pipeline.lake.rows("silver.financial_facts", EqualTo("cik", cik))
+        facts = pipeline.lake.rows(
+            "silver.financial_facts",
+            And(EqualTo("cik", cik), EqualTo("is_numeric", True)),
+            columns=(
+                "id",
+                "is_numeric",
+                "is_valid",
+                "is_nil",
+                "dimensions",
+                "taxonomy",
+                "concept",
+                "unit",
+                "accession_number",
+                "period_start",
+                "period_end",
+                "instant_date",
+                "decimals",
+                "value",
+            ),
+        )
         for f in facts:
             if not f["is_numeric"] or not f["is_valid"] or f["is_nil"] or f["dimensions"] != "{}":
                 continue

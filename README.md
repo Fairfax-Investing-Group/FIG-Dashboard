@@ -85,6 +85,7 @@ The implementation follows the current official
 [Basin PyIceberg example](https://developers.cloudflare.com/basin-catalog/config-examples/pyiceberg/)
 and [R2 S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/).
 Basin supplies an Iceberg REST catalog; PyIceberg writes Parquet to its warehouse.
+Existing remote tables must carry the project ownership marker; unowned tables are refused.
 No Basin SQL integration is used. Remote credentials and a live catalog are
 required before remote integration can be verified.
 
@@ -105,7 +106,7 @@ Iceberg data files by hand. Keep Raw immutable regardless of lake compaction.
 ```
 
 Tests use a small retained archive of actual filings and their taxonomies,
-including iXBRL scaling, dimensions, extensions, relationships, reported YTD,
-rounding, amendment identities, complete source lineage and Company Facts
+including iXBRL scaling, standalone XBRL, dimensions, extensions, relationships, reported YTD,
+rounding, paired original/amended financials, complete source lineage and Company Facts
 comparison. The suite actually deletes Silver/Gold, rebuilds them offline and
 compares every table's semantic hash. No fabricated financial histories are used.

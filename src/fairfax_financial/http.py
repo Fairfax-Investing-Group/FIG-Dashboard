@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -16,8 +17,11 @@ class Fetcher:
         self.user_agent = user_agent
         self.client = httpx.Client(timeout=120, follow_redirects=False, transport=transport)
         self.last = 0.0
+        self.cooldown_until = 0.0
 
     def fetch(self, url, *, method="GET", payload=None):
+        if time.monotonic() < self.cooldown_until:
+            raise Blocked("Source Retry-After cooldown is still active; no request sent")
         original = url
         for redirect in range(6):
             if urlparse(url).scheme != "https":
@@ -38,7 +42,22 @@ class Fetcher:
                     raise Blocked(f"Source refused access (403): {url}; no bypass attempted")
                 if response.status_code in {429, 500, 502, 503, 504}:
                     wait = response.headers.get("Retry-After", "")
-                    time.sleep(min(float(wait) if wait.isdigit() else 2**attempt, 60))
+                    delay = 2**attempt
+                    if wait:
+                        try:
+                            delay = (
+                                float(wait)
+                                if wait.isdigit()
+                                else max(0, parsedate_to_datetime(wait).timestamp() - time.time())
+                            )
+                        except (ValueError, TypeError, OverflowError):
+                            pass
+                    if delay > 60:
+                        self.cooldown_until = time.monotonic() + delay
+                        raise Blocked(
+                            f"Source requires Retry-After {wait}; batch deferred without early retry"
+                        )
+                    time.sleep(delay)
                     continue
                 response.raise_for_status()
                 break

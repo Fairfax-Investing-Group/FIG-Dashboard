@@ -4,9 +4,10 @@ import os
 
 import polars as pl
 import pyarrow as pa
+import pyarrow.parquet as pq
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError
-from pyiceberg.expressions import AlwaysTrue, EqualTo
+from pyiceberg.expressions import AlwaysTrue, And, EqualTo
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.transforms import BucketTransform
@@ -62,6 +63,11 @@ class Lake:
         for name, schema in SCHEMAS.items():
             if self.catalog.table_exists(name):
                 existing = self.catalog.load_table(name)
+                if (
+                    self.settings.storage == "r2"
+                    and existing.properties.get("fairfax.project") != "financial-source-v1"
+                ):
+                    raise Blocked("Refusing an existing unowned remote table: " + name)
                 if set(schema.names) - {f.name for f in existing.schema().fields}:
                     with existing.update_schema() as update:
                         update.union_by_name(schema)
@@ -103,11 +109,17 @@ class Lake:
                     "write.parquet.compression-codec": "zstd",
                     "write.target-file-size-bytes": "134217728",
                     "format-version": "2",
+                    "fairfax.project": "financial-source-v1",
                 },
             )
 
-    def rows(self, name, where=None):
-        return self.catalog.load_table(name).scan(row_filter=where or AlwaysTrue()).to_arrow().to_pylist()
+    def rows(self, name, where=None, columns=None):
+        return (
+            self.catalog.load_table(name)
+            .scan(row_filter=where or AlwaysTrue(), selected_fields=columns or ("*",))
+            .to_arrow()
+            .to_pylist()
+        )
 
     def upsert(self, name, rows):
         if not rows:
@@ -120,10 +132,20 @@ class Lake:
         # PyIceberg compares all columns and does not commit unchanged data.
         self.catalog.load_table(name).upsert(table, join_cols=["id"])
 
-    def replace(self, name, rows, column, value):
+    def replace(self, name, rows, column, value, company=None):
         """Atomically replace one filing's derivation, including removals after rule fixes."""
         condition = EqualTo(column, value)
-        previous = self.rows(name, condition)
+        if company is not None:
+            condition = And(condition, EqualTo("company_id", company))
+        table = self.catalog.load_table(name)
+        # Parse-run hashes already detect unchanged Silver input. Do not hydrate
+        # old text blocks just to compare a filing that must be replaced.
+        fact_table = name == "silver.financial_facts"
+        previous = (
+            table.scan(row_filter=condition, selected_fields=("id",), limit=1).to_arrow().to_pylist()
+            if fact_table
+            else self.rows(name, condition)
+        )
 
         def sort(xs):
             return sorted(xs, key=lambda r: r["id"])
@@ -132,7 +154,11 @@ class Lake:
         ids = pl.from_arrow(incoming)["id"]
         if ids.null_count() or ids.n_unique() != len(ids):
             raise ValueError("Duplicate/null deterministic keys in " + name)
-        if sort(previous) == sort(incoming.to_pylist()):
+        if not previous and not rows:
+            return
+        if not fact_table and sort(previous) == sort(
+            [{n: r.get(n) for n in SCHEMAS[name].names} for r in rows]
+        ):
             return
         self.guard(incoming)
         if not previous:
@@ -146,7 +172,11 @@ class Lake:
         # Conservative reservation for Parquet and Iceberg metadata; periodically
         # reconcile with physical inventory (which includes obsolete snapshots).
         current = self.objects.usage(refresh=self._writes % 100 == 0)
-        reserve = incoming.nbytes * 2 + 131072
+        # Reserve against measured compressed bytes, not expanded text/XML size.
+        # A counting sink avoids allocating a second Parquet buffer in memory.
+        sink = pa.MockOutputStream()
+        pq.write_table(incoming, sink, compression="zstd")
+        reserve = sink.size() * 2 + 131072
         if current + reserve > self.settings.limit_bytes:
             raise Blocked(
                 f"Lake storage guard: projected up to {current + reserve:,} bytes, "

@@ -30,11 +30,14 @@ A ten-year *filing-date* window can include older comparative accounting periods
 these are real observations and are not assigned a manufactured fiscal year.
 
 A filing bundle is published only when its source dependency graph is complete.
-Failed downloads can resume from individual immutable receipts. All external
+Failed downloads can resume from individual immutable receipts. Local publication
+is atomic, and receipt indexes/metadata processing avoid decoding every issuer
+JSON simultaneously. All external
 requests, retries and redirects share a sequential client capped below five
 requests/second, below SEC's documented ten-request/second maximum. HTTP 403
 stops that source attempt; three consecutive source refusals stop a batch.
-There is no proxy rotation or access bypass. Retry-After/backoff is respected.
+There is no proxy rotation or access bypass. Retry-After/backoff is respected, including HTTP-date headers. A long source
+cooldown defers the batch without making an early retry.
 
 ## Silver
 
@@ -104,7 +107,9 @@ units, and whole-entity contexts enter Gold. Dimensions and extensions remain
 in Silver unless a reviewed exact rule is added. All canonical rule matches
 must agree within their original XBRL accuracy intervals. For consistent
 rounding duplicates the most precise **reported original** is selected.
-Inconsistent alternatives are withheld and flagged. No balancing or averaging
+Inconsistent alternatives are withheld and flagged. Per-filing canonical coverage
+gaps are recorded explicitly. Future disclosure contexts are retained in Silver
+but excluded from historical canonical statement facts. No balancing or averaging
 creates replacement financial values.
 
 Mappings distinguish parent net income (`NetIncomeLoss`) from income including
@@ -119,7 +124,7 @@ conservative; missing canonical fields are a coverage limitation, not zero.
 ## Physical layout and reproducibility
 
 Iceberg v2 tables use Zstandard Parquet; large fact tables bucket issuer IDs
-into 32 partitions. Filing-scoped atomic replacements remove obsolete
+into 32 partitions. Issuer-and-accession-scoped atomic replacements remove obsolete
 normalization results without rewriting every issuer. Deterministic fact IDs
 include accession, original source hash and original positional element path (without long-concept-name truncation). Repeating
 unchanged upserts does not create snapshots. Immutable raw receipts, not a
@@ -134,7 +139,11 @@ reports failure rather than quietly omitting them.
 
 Single-machine writes are supported; parallel distributed ingestion is not.
 Per-filing batches bound parser memory. Table scans for structural validation
-select keys; source/Gold validation then works per accession. On a full lake,
+select keys; source/Gold validation then works per issuer/accession with explicit column
+projections. Numeric paths do not hydrate filing prose/text blocks. Full-row
+rebuild checks hash one row at a time, preserving all Silver columns without
+constructing a second whole-lake JSON representation. Storage reservations use
+measured compressed Parquet sizes rather than expanded XML/text size. On a full lake,
 plan periodic compaction/snapshot expiry with Basin maintenance and measure
 storage before choosing a longer retention policy. Nothing deletes or expires
 Raw automatically.
