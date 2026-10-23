@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
 import type { AnnualRow, FactSource, Metric, Study } from './types';
 import { annualGrowth, fiveYearEstimate, logLinearRegression } from './financialMath';
-import { fittedObservation, nearestObservation } from './chartInteraction';
+import { nearestChartLine, nearestObservation, interpolatedObservation } from './chartInteraction';
 
 const metrics: { key: Metric; title: string; color: string; note: string }[] = [
   { key: 'sales', title: 'Sales', color: '#2563eb', note: 'Annual revenue' },
@@ -36,9 +36,46 @@ const chartSeries: { key: ChartKey; title: string; color: string }[] = [
 const timestamp = (value: string) => Date.parse(`${value}T00:00:00Z`);
 const chartDate = (value: number) => displayDate(new Date(value).toISOString().slice(0, 10));
 
+type HoverLine = { id: ChartLineId; points: { timestamp: number; value: number | null }[] };
+type HoveredObservation = { id: ChartLineId; timestamp: number };
+
+function LineHoverLayer({ lines, hovered, onHover, onSelect }: { lines: HoverLine[]; hovered: HoveredObservation | null; onHover: (hit: HoveredObservation | null) => void; onSelect: (id: ChartLineId) => void }) {
+  const area = usePlotArea();
+  const xScale = useXAxisScale(), yScale = useYAxisScale(), xInverse = useXAxisInverseScale();
+  if (!area || !xScale || !yScale || !xInverse) return null;
+  const pixels = lines.map(line => ({ id: line.id, priority: line.id.endsWith(':actual') ? 1 : 0, points: line.points.map(point => {
+    const x = xScale(point.timestamp), y = point.value === null ? undefined : yScale(point.value);
+    return x === undefined || y === undefined ? null : { x, y };
+  }) }));
+  function hitAt(event: { currentTarget: SVGRectElement; clientX: number; clientY: number }) {
+    const svg = event.currentTarget.closest('svg');
+    if (!svg) return null;
+    const bounds = svg.getBoundingClientRect();
+    const x = (event.clientX - bounds.left) * (svg.viewBox.baseVal.width || bounds.width) / bounds.width;
+    const y = (event.clientY - bounds.top) * (svg.viewBox.baseVal.height || bounds.height) / bounds.height;
+    const id = nearestChartLine(pixels, { x, y });
+    const line = lines.find(line => line.id === id);
+    const observations = line?.points.filter((point): point is { timestamp: number; value: number } => point.value !== null) ?? [];
+    const time = Number(xInverse!(x));
+    const observation = id?.endsWith(':fit') ? interpolatedObservation(observations, time) : nearestObservation(observations, time);
+    return id && observation ? { id, timestamp: observation.timestamp } : null;
+  }
+  const hoveredPoints = lines.find(line => line.id === hovered?.id)?.points.filter((point): point is { timestamp: number; value: number } => point.value !== null) ?? [];
+  const marked = hovered?.id.endsWith(':fit') ? interpolatedObservation(hoveredPoints, hovered.timestamp) : hoveredPoints.find(point => point.timestamp === hovered?.timestamp);
+  const color = chartSeries.find(metric => hovered?.id.startsWith(`${metric.key}:`))?.color;
+  return <ZIndexLayer zIndex={2500}><g className="line-hover-layer">
+    <rect data-testid="line-hover-area" x={area.x} y={area.y} width={area.width} height={area.height} fill="transparent" style={{ cursor: 'crosshair' }} onPointerMove={event => onHover(hitAt(event))} onPointerDown={event => onHover(hitAt(event))} onPointerLeave={() => onHover(null)} onClick={event => { const hit = hitAt(event); onHover(hit); if (hit) onSelect(hit.id); }}/>
+    {marked && marked.value !== null && <g pointerEvents="none"><line x1={xScale(marked.timestamp)} x2={xScale(marked.timestamp)} y1={area.y} y2={area.y + area.height} stroke={color} strokeOpacity={0.25} strokeDasharray="3 4"/><circle cx={xScale(marked.timestamp)} cy={yScale(marked.value)} r={6} fill={color} stroke="white" strokeWidth={2}/></g>}
+  </g></ZIndexLayer>;
+}
+
 function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) {
   const [hidden, setHidden] = useState<ChartLineId[]>([]);
   const [selected, setSelected] = useState<ChartLineId | null>(null);
+  const [hovered, setHovered] = useState<HoveredObservation | null>(null);
+  function hoverLine(hit: HoveredObservation | null) {
+    setHovered(current => current?.id === hit?.id && current?.timestamp === hit?.timestamp ? current : hit);
+  }
   const financials: ChartPoint[] = annual.map(row => ({ timestamp: timestamp(row.periodEnd), sales: row.sales, eps: row.eps, pretaxProfit: row.pretaxProfit }));
   const prices: ChartPoint[] = study.prices.map(point => ({ timestamp: timestamp(point.date), close: point.close }));
   const points = new Map<number, ChartPoint>();
@@ -65,12 +102,13 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
   const visible = series.filter(metric => visibleLines.some(line => line.key === metric.key));
   const selectedLine = lines.find(line => line.id === selected);
   const lineVisible = (id: ChartLineId) => lines.some(line => line.id === id) && !hidden.includes(id);
-  const lineOpacity = (id: ChartLineId, normal = 1) => selectedLine && selectedLine.id !== id ? 0.12 : normal;
   function inspectLine(id: ChartLineId | null) {
     setSelected(id);
+    setHovered(null);
     if (id) setHidden(current => current.filter(item => item !== id));
   }
   function toggleLine(id: ChartLineId) {
+    setHovered(null);
     setHidden(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
     if (selected === id) setSelected(null);
   }
@@ -105,6 +143,11 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     ...(lineVisible(`${metric.key}:actual`) ? metric.data : []),
     ...(metric.key !== 'close' && lineVisible(`${metric.key}:fit`) ? metric.regressionData : []),
   ].map(point => point[metric.key]).filter((value): value is number => value != null)) : [];
+  const hoverLines: HoverLine[] = visibleLines.map(line => {
+    const metric = spaced.find(metric => metric.key === line.key)!;
+    const data = line.kind === 'fit' ? metric.regressionData : metric.data;
+    return { id: line.id, points: data.map(point => ({ timestamp: point.timestamp, value: point[line.key] ?? null })) };
+  });
   const domain: [number, number] = isolatedPoints.length ? [Math.min(...isolatedPoints) - 0.2, Math.max(...isolatedPoints) + 0.2] : [0, series.length - 1 + bandHeight + 0.3];
   const axisNames: Record<ChartKey, string> = { sales: 'Sales', eps: 'EPS', pretaxProfit: 'Pre-tax profit', close: 'Stock price' };
   const axisLabels = spaced.filter(metric => visibleLines.some(line => line.key === metric.key)).flatMap(metric => {
@@ -123,9 +166,9 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     <div className="line-inspector-controls">
       <label>Inspect line <select aria-label="Inspect a chart line" value={selectedLine?.id ?? ''} onChange={event => inspectLine(event.target.value ? event.target.value as ChartLineId : null)}><option value="">All visible lines</option>{lines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select></label>
       <button disabled={!selectedLine} onClick={() => { if (selectedLine) setHidden(lines.filter(line => line.id !== selectedLine.id).map(line => line.id)); }}>Show only this line</button>
-      <button onClick={() => { setHidden([]); setSelected(null); }}>Show all</button>
+      <button onClick={() => { setHidden([]); setSelected(null); setHovered(null); }}>Show all</button>
     </div>
-    <div className="line-inspector-status" role="status">{selectedLine ? <><i style={{ background: selectedLine.color }}/><strong>{selectedLine.name}</strong><span>{chartDate(selectedLine.observations[0].timestamp)} – {chartDate(selectedLine.observations.at(-1)!.timestamp)} · Hover to inspect {selectedLine.kind === 'fit' ? 'fitted' : 'actual'} values</span></> : 'Click a line or choose one above to inspect it. Toggle Actual and Regression independently.'}</div>
+    <div className="line-inspector-status" role="status">{selectedLine ? <><i style={{ background: selectedLine.color }}/><strong>{selectedLine.name}</strong><span>{chartDate(selectedLine.observations[0].timestamp)} – {chartDate(selectedLine.observations.at(-1)!.timestamp)} · Hover for yearly actuals or smooth fitted values</span></> : 'Hover near a line for its value; regression hovers follow the cursor smoothly. Click to select; toggle Actual and Regression independently.'}</div>
     <div className="plot-meta"><span>TREND COMPARISON</span><span>Logarithmic scales{usesSymlog ? ' · Symmetric log for zero or losses' : ''}</span></div>
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 24, right: 24, bottom: 12, left: 0 }} accessibilityLayer>
       <CartesianGrid vertical horizontal stroke="#e8edf0" syncWithTicks/>
@@ -134,19 +177,15 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
         const label = axisLabels.find(item => item.value === Number(payload.value));
         return <text x={Number(x) - 7} y={Number(y)} dy={4} textAnchor="end" fill={label?.color} fontSize={10} fontWeight={500}>{label?.name}</text>;
       }}/>
-      <Tooltip cursor={{ stroke: '#9ba9b5', strokeWidth: 1, strokeDasharray: '3 4' }} content={({ active, label }) => {
-        if (!active || label == null) return null;
-        const time = Number(label);
-        const inspected = selectedLine ? [selectedLine] : visibleLines;
-        const details = inspected.flatMap(line => {
-          const point = line.kind === 'fit' ? fittedObservation(line.observations, time) : selectedLine ? nearestObservation(line.observations, time) : line.observations.find(point => point.timestamp === time);
-          return point ? [{ line, point }] : [];
-        });
-        if (!details.length) return selectedLine ? <div className="overlay-tooltip"><strong>{chartDate(time)}</strong><span>Outside this regression’s historical range.</span></div> : null;
-        return <div className="overlay-tooltip"><strong>{chartDate(time)}</strong>{details.map(({ line, point }) => <div key={line.id} style={{ color: line.color }}><span>{line.name}{point.timestamp !== time && <small className="tooltip-observed-date">Observed {chartDate(point.timestamp)}</small>}</span><b>{money(point.value, line.key === 'close' ? study.priceCurrency : study.financialCurrency, line.key === 'eps' || line.key === 'close')}</b></div>)}</div>;
+      <Tooltip active={hovered !== null} cursor={false} content={() => {
+        const line = visibleLines.find(line => line.id === hovered?.id);
+        const point = line && hovered ? line.kind === 'fit' ? interpolatedObservation(line.observations, hovered.timestamp, 'log') : nearestObservation(line.observations, hovered.timestamp) : null;
+        if (!line || !point) return null;
+        return <div className="overlay-tooltip"><strong>{line.kind === 'fit' || line.key === 'close' ? chartDate(point.timestamp) : `Year ended ${chartDate(point.timestamp)}`}</strong><div style={{ color: line.color }}><span>{line.name}</span><b>{money(point.value, line.key === 'close' ? study.priceCurrency : study.financialCurrency, line.key === 'eps' || line.key === 'close')}</b></div></div>;
       }}/>
-      {spaced.filter(metric => metric.key !== 'close' && lineVisible(`${metric.key}:fit`)).map(metric => <Line key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={selected === `${metric.key}:fit` ? 3 : 2} strokeOpacity={lineOpacity(`${metric.key}:fit` as ChartLineId, selected === `${metric.key}:fit` ? 0.65 : 0.4)} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:fit` as ChartLineId)}/>)}
-      {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={selected === `${metric.key}:actual` ? 3.5 : metric.key === 'close' ? 1.6 : 3} strokeOpacity={lineOpacity(`${metric.key}:actual`, metric.key === 'close' ? 0.65 : 1)} dot={metric.key === 'close' ? false : { r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color, opacity: lineOpacity(`${metric.key}:actual`) }} activeDot={{ r: 7, fill: metric.color, stroke: '#fff', strokeWidth: 3 }} connectNulls={false} isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:actual`)}/>)}
+      {spaced.filter(metric => metric.key !== 'close' && lineVisible(`${metric.key}:fit`)).map(metric => <Line key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={selected === `${metric.key}:fit` ? 3 : 2} strokeOpacity={selected === `${metric.key}:fit` ? 0.65 : 0.4} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:fit` as ChartLineId)}/>)}
+      {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={selected === `${metric.key}:actual` ? 3.5 : metric.key === 'close' ? 1.6 : 3} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : { r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color }} activeDot={false} connectNulls={false} isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:actual`)}/>)}
+      <LineHoverLayer lines={hoverLines} hovered={hovered} onHover={hoverLine} onSelect={setSelected}/>
     </LineChart></ResponsiveContainer></div> : <div className="chart-empty">{lines.length ? 'All lines are hidden. Choose Show all to restore the chart.' : 'No comparable history is available. Refresh to try again.'}</div>}
     <div className="chart-footnote"><span className="split-status"><i/>Split-normalized EPS & price</span><span>Translucent lines: log-linear regression · Annual financials · Daily closing prices</span></div>
     <p className="overlay-note">Each line has its own logarithmic scale and vertical offset to make its trend clear. Compare direction and shape; slopes do not compare growth rates. Hover for actual values. Missing annual values remain gaps.</p>
