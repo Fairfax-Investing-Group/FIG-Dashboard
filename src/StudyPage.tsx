@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AnnualRow, FactSource, Metric, Study } from './types';
+import { annualGrowth, fiveYearEstimate } from './financialMath';
 
 const metrics: { key: Metric; title: string; color: string; note: string }[] = [
   { key: 'sales', title: 'Sales', color: '#2563eb', note: 'Annual revenue' },
@@ -75,6 +76,11 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     };
   });
   const domain: [number, number] = [0, series.length - 1 + bandHeight + 0.3];
+  const axisNames: Record<ChartKey, string> = { sales: 'Sales', eps: 'EPS', pretaxProfit: 'Pre-tax profit', close: 'Stock price' };
+  const axisLabels = spaced.filter(metric => !hidden.includes(metric.key)).flatMap(metric => {
+    const first = metric.data.find(point => point[metric.key] != null);
+    return first ? [{ value: first[metric.key]!, name: axisNames[metric.key], color: metric.color }] : [];
+  });
   function toggleSeries(key: ChartKey) {
     setHidden(current => current.includes(key) ? current.filter(item => item !== key) : current.length < chartSeries.length - 1 ? [...current, key] : current);
   }
@@ -87,9 +93,12 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     </button>)}</div>
     <div className="plot-meta"><span>TREND COMPARISON</span><span>Logarithmic scales{usesSymlog ? ' · Symmetric log for zero or losses' : ''}</span></div>
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 24, right: 24, bottom: 12, left: 0 }} accessibilityLayer>
-      <CartesianGrid vertical horizontal={false} stroke="#e8edf0" syncWithTicks/>
+      <CartesianGrid vertical horizontal stroke="#e8edf0" syncWithTicks/>
       <XAxis dataKey="timestamp" type="number" scale="time" domain={[Date.UTC(firstYear, 0, 1), Date.UTC(lastYear, 11, 31)]} ticks={yearTicks} tickFormatter={value => String(new Date(Number(value)).getUTCFullYear())} tick={{ fontSize: 12, fill: '#7c8793', fontWeight: 500 }} tickLine={false} axisLine={false} minTickGap={30} dy={12}/>
-      <YAxis hide domain={domain} type="number" scale="linear" allowDataOverflow/>
+      <YAxis domain={domain} type="number" scale="linear" width={84} ticks={axisLabels.map(label => label.value)} interval={0} axisLine={{ stroke: '#e1e7e4' }} tickLine={{ stroke: '#d3ddd6' }} allowDataOverflow tick={({ x, y, payload }) => {
+        const label = axisLabels.find(item => item.value === Number(payload.value));
+        return <text x={Number(x) - 7} y={Number(y)} dy={4} textAnchor="end" fill={label?.color} fontSize={10} fontWeight={500}>{label?.name}</text>;
+      }}/>
       <Tooltip cursor={{ stroke: '#9ba9b5', strokeWidth: 1, strokeDasharray: '3 4' }} content={({ active, label }) => {
         const point = points.get(Number(label));
         if (!active || !point) return null;
@@ -103,8 +112,42 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
   </section>;
 }
 
+function FinancialTable({ annual, study }: { annual: AnnualRow[]; study: Study }) {
+  const [forecasts, setForecasts] = useState({ sales: '', eps: '' });
+  const rows = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+  const currency = study.financialCurrency === 'USD' ? '$' : study.financialCurrency || 'Currency unavailable';
+  const labels: Record<Metric, string> = {
+    sales: `Historical sales (${currency}M)`,
+    eps: `Historical EPS (${currency})`,
+    pretaxProfit: `Pre-tax profit (${currency}M)`,
+  };
+  return <section className="financial-table-section fundamentals" aria-labelledby="financial-table-title">
+    <div className="fundamentals-title"><h2 id="financial-table-title">Fundamental Company Data</h2><span>Annual financials</span></div>
+    <div className="financial-table-scroll"><table>
+      <caption className="sr-only">Annual company data by fiscal year, historical annualized growth, forecast assumptions, and five-year estimates. EPS is split-normalized.</caption>
+      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd} title={`Fiscal year ended ${displayDate(row.periodEnd)}`}>{row.periodEnd.slice(0, 4)}</th>)}<th scope="col" className="calculated-column">Growth (%)</th><th scope="col">Forecast (%)</th><th scope="col">5 Yr Est</th></tr></thead>
+      <tbody>{metrics.map(metric => {
+        const scale = metric.key === 'eps' ? 1 : 1_000_000;
+        const supported = rows.filter(row => row[metric.key] !== null);
+        const first = supported[0];
+        const latest = supported.at(-1);
+        const growth = first && latest ? annualGrowth(first[metric.key], latest[metric.key], first.periodEnd, latest.periodEnd) : null;
+        const forecastKey = metric.key === 'sales' || metric.key === 'eps' ? metric.key : null;
+        const estimate = forecastKey ? fiveYearEstimate(latest?.[metric.key] ?? null, forecasts[forecastKey]) : null;
+        return <tr key={metric.key}>
+          <th scope="row">{labels[metric.key]}</th>
+          {rows.map(row => <td key={row.periodEnd}><SourceLink source={row[`${metric.key}Source`]} cik={study.company.cik} value={row[metric.key] === null ? null : row[metric.key]! / scale} currency={null} eps={metric.key === 'eps'}/></td>)}
+          <td className="calculated-column" title={first && latest ? `Compound annual growth: ${displayDate(first.periodEnd)} to ${displayDate(latest.periodEnd)}` : undefined}>{growth === null ? '—' : `${growth.toFixed(1)}%`}</td>
+          <td className="forecast-cell">{forecastKey ? <input type="number" step="0.1" min="-100" value={forecasts[forecastKey]} placeholder="—" aria-label={`${metric.title} annual forecast percentage`} onChange={event => setForecasts(current => ({ ...current, [forecastKey]: event.target.value }))}/> : '—'}</td>
+          <td className="estimate-cell">{money(estimate === null ? null : estimate / scale, null, metric.key === 'eps')}</td>
+        </tr>;
+      })}</tbody>
+    </table>{!rows.length && <p className="table-empty">Annual financials could not be loaded for this company.</p>}</div>
+    <p className="table-note">Sales and pre-tax profit are in millions; EPS is split-normalized. Click historical values for SEC filings. Growth is compound annual growth between the first and last available values; unavailable for nonpositive endpoints. Enter annual sales and EPS forecasts to calculate five-year estimates from each metric’s latest available year. Forecasts are your assumptions. — means unavailable.</p>
+  </section>;
+}
+
 export default function StudyPage({ study, onBack, onRefresh }: { study: Study; onBack: () => void; onRefresh: () => void }) {
-  const [descending, setDescending] = useState(true);
   useEffect(() => {
     document.title = `${study.company.ticker} · Stock Study`;
     return () => { document.title = 'Stock Search'; };
@@ -114,7 +157,6 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
     ...row,
     eps: normalized && row.epsSplitFactor != null && Number.isFinite(row.epsSplitFactor) && row.epsSplitFactor > 0 ? row.eps : null,
   }));
-  const rows = descending ? [...annual].reverse() : annual;
   const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);
   return <main className="study-page">
     <div className="study-nav"><button className="back-button" onClick={onBack}>← Company search</button><span>Stock study</span></div>
@@ -123,7 +165,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
     {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={onRefresh}>Retry both sources</button>}</aside>}
     {!study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
     <OverlayChart annual={annual} study={study}/>
-    <section className="financial-table-section" aria-labelledby="financial-table-title"><div className="table-heading"><div><h2 id="financial-table-title">Annual financials</h2><p>Full fiscal years · {study.financialCurrency || 'Reporting currency unavailable'} · Click a value to view its SEC filing</p></div><button className="sort-button" onClick={() => setDescending(!descending)}>{descending ? 'Newest first ↓' : 'Oldest first ↑'}</button></div><div className="financial-table-scroll"><table><caption className="sr-only">Historic sales, split-normalized diluted earnings per share, and pre-tax profit from SEC filings.</caption><thead><tr><th scope="col">Year ended</th><th scope="col">Sales</th><th scope="col">Split-normalized EPS</th><th scope="col">Pre-tax profit</th></tr></thead><tbody>{rows.map(row => <tr key={row.periodEnd}><th scope="row">{displayDate(row.periodEnd)}</th>{metrics.map(metric => <td key={metric.key}><SourceLink source={row[`${metric.key}Source`]} cik={study.company.cik} value={row[metric.key]} currency={study.financialCurrency} eps={metric.key === 'eps'}/></td>)}</tr>)}</tbody></table>{!rows.length && <p className="table-empty">Annual financials could not be loaded for this company.</p>}</div><p className="table-note">— means unavailable. Figures use the latest available filing for each supported SEC concept. {normalized ? `EPS is split-normalized through ${study.epsAdjustment?.asOf}. Each source filing is treated as already reflecting splits through its filing date; only later splits are applied.` : 'Only split-normalized EPS is displayed. Refresh to retry unavailable values.'} Sales and pre-tax profit are company totals unaffected by stock splits. Pre-tax profit refers to continuing operations where reported.</p></section>
+    <FinancialTable key={study.id} annual={annual} study={study}/>
     <footer className="study-footer"><div><strong>Sources</strong><a href={study.sources.sec.url} target="_blank" rel="noreferrer">SEC Company Facts ↗</a><span>{study.sources.sec.retrievedAt ? `Retrieved ${new Date(study.sources.sec.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><div><strong>Price history</strong><a href={study.sources.yfinance.url} target="_blank" rel="noreferrer">Yahoo Finance via yfinance ↗</a><span>{study.sources.yfinance.retrievedAt ? `Retrieved ${new Date(study.sources.yfinance.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><p>Financials cover the latest ten available full fiscal years. Prices cover the trailing decade where available and use Yahoo’s split-adjusted close, without dividend adjustment. Refresh creates a new study snapshot.</p></footer>
   </main>;
 }
