@@ -166,9 +166,8 @@ footer a:hover { text-decoration: underline; }
 
 .overlay-note { font-size:11px; color:#7d8999; line-height:1.8; margin:18px 0 8px; }
 .chart-baselines { display:flex; flex-wrap:wrap; gap:6px 18px; color:#99a2af; font-size:10px; line-height:1.7; }
-.overlay-tooltip { background:#fff; border:1px solid #e5e9ef; border-radius:8px; padding:12px 14px; font-size:11px; box-shadow:0 4px 16px #19212c0a; }
-.overlay-tooltip>strong { display:block; margin-bottom:10px; color:#526071; }
-.overlay-tooltip>div { display:flex; justify-content:space-between; gap:20px; margin-top:7px; }
+.overlay-tooltip { display:flex; align-items:center; gap:9px; background:#fff; border:1px solid #e5e9ef; border-radius:6px; padding:6px 9px; font-size:11px; white-space:nowrap; box-shadow:0 3px 12px #19212c0a; }
+.overlay-tooltip>span { color:#7c8990; }
 .overlay-tooltip b { font-weight:500; font-variant-numeric:tabular-nums; }
 @media(max-width:540px) { .chart-series-legend { grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px 12px; }  .chart-series-item strong { font-size:14px; } }
 
@@ -200,7 +199,7 @@ footer a:hover { text-decoration: underline; }
 .split-status i { width:6px; height:6px; background:#4a9e61; border-radius:50%; }
 .overlay-note { font-size:10px; margin:13px 0 6px; color:#98a39d; }
 .chart-baselines { font-size:9px; color:#abb4ae; }
-.overlay-tooltip { border-color:#e2e9e4; border-radius:10px; padding:15px 18px; box-shadow:0 8px 28px #192d2110; }
+.overlay-tooltip { border-color:#e2e9e4; }
 @media(max-width:900px) { .study-page { padding:28px 24px; } .chart-series-item { padding:15px 12px; } .chart-series-item strong { font-size:17px; } .chart-controls { gap:10px; } }
 @media(max-width:640px) {
   .study-page { padding:22px 16px; }
@@ -257,5 +256,4 @@ footer a:hover { text-decoration: underline; }
 .line-inspector-status { display:flex; flex-wrap:wrap; align-items:center; gap:7px; min-height:28px; color:#87958c; font-size:10px; line-height:1.8; margin-bottom:15px; }
 .line-inspector-status i { width:7px; height:7px; border-radius:50%; }
 .line-inspector-status strong { color:#52675a; font-weight:500; }
-.tooltip-observed-date { display:block; color:#94a099; font-size:9px; margin-top:3px; }
 @media(max-width:640px) { .line-inspector-controls label { width:100%; } .line-inspector-controls select { flex:1; min-width:0; } .line-inspector-status { padding:0 4px; } }
