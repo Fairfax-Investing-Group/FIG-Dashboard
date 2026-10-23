@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = readFileSync(new URL('../src/financialMath.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
-const { annualGrowth, fiveYearEstimate } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { annualGrowth, fiveYearEstimate, logLinearRegression } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const points = values => values.map((value, index) => ({ periodEnd: `${2016 + index}-12-31`, value }));
 
 test('log-linear regression matches all three reference growth percentages', () => {
@@ -41,4 +41,23 @@ test('forecasts continue to compound the user rate independently of historical g
   assert.equal(fiveYearEstimate(10.81, ''), null);
   assert.equal(fiveYearEstimate(null, '15'), null);
   assert.equal(fiveYearEstimate(10.81, '-101'), null);
+});
+
+
+test('fitted log-linear values recover an exact exponential trend', () => {
+  const input = points([100, 110, 121]);
+  const model = logLinearRegression(input);
+  assert.ok(Math.abs(model.growthRate - 10) < 1e-10);
+  model.fitted.forEach((point, index) => assert.ok(Math.abs(point.value - input[index].value) < 1e-10));
+  assert.deepEqual(input.map(point => point.value), [100, 110, 121]);
+});
+
+test('regression fit uses all observations and preserves missing-year gaps', () => {
+  const model = logLinearRegression(points([100, 200, 100]));
+  const expected = Math.cbrt(100 * 200 * 100);
+  assert.ok(model.fitted.every(point => Math.abs(point.value - expected) < 1e-10));
+  const gapped = logLinearRegression(points([100, null, 121]));
+  assert.equal(gapped.fitted.length, 2);
+  assert.equal(gapped.fitted[1].periodEnd, '2018-12-31');
+  assert.equal(logLinearRegression(points([100, 0, 121])), null);
 });

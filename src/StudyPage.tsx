@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AnnualRow, FactSource, Metric, Study } from './types';
-import { annualGrowth, fiveYearEstimate } from './financialMath';
+import { annualGrowth, fiveYearEstimate, logLinearRegression } from './financialMath';
 
 const metrics: { key: Metric; title: string; color: string; note: string }[] = [
   { key: 'sales', title: 'Sales', color: '#2563eb', note: 'Annual revenue' },
@@ -45,8 +45,10 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     const source = (metric.key === 'close' ? prices : financials).slice().sort((a, b) => a.timestamp - b.timestamp);
     const baseline = source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.[metric.key];
     const data = source.map(point => ({ timestamp: point.timestamp, [metric.key]: baseline == null || point[metric.key] == null ? null : point[metric.key]! / Math.abs(baseline) * 100 }));
+    const regression = metric.key === 'close' ? null : logLinearRegression(data.map(point => ({ periodEnd: new Date(point.timestamp).toISOString().slice(0, 10), value: point[metric.key] ?? null })));
+    const regressionData: ChartPoint[] = regression?.fitted.map(point => ({ timestamp: timestamp(point.periodEnd), [metric.key]: point.value })) ?? [];
     const latest = source.filter(point => point[metric.key] != null).at(-1);
-    return { ...metric, data, latest, baselineDate: source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.timestamp };
+    return { ...metric, data, regressionData, regressionRate: regression?.growthRate ?? null, latest, baselineDate: source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.timestamp };
   });
   const visible = series.filter(metric => !hidden.includes(metric.key));
   const values = visible.flatMap(metric => metric.data.map(point => point[metric.key] ?? null));
@@ -63,7 +65,7 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     if (!available.length) return metric;
     const signed = available.some(value => value <= 0);
     const log = (value: number) => signed ? Math.sign(value) * Math.log1p(Math.abs(value)) : Math.log(value);
-    const logged = available.map(log);
+    const logged = [...available, ...metric.regressionData.map(point => point[metric.key]!)].map(log);
     const min = Math.min(...logged);
     const range = Math.max(...logged) - min;
     const bottom = series.length - index - 1 + 0.15;
@@ -73,6 +75,7 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
         ...point,
         [metric.key]: point[metric.key] == null ? null : bottom + (range === 0 ? bandHeight / 2 : (log(point[metric.key]!) - min) / range * bandHeight),
       })),
+      regressionData: metric.regressionData.map(point => ({ ...point, [metric.key]: bottom + (range === 0 ? bandHeight / 2 : (log(point[metric.key]!) - min) / range * bandHeight) })),
     };
   });
   const domain: [number, number] = [0, series.length - 1 + bandHeight + 0.3];
@@ -90,6 +93,7 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
       <span><i style={{ background: metric.color }}/>{metric.title}<span className="series-check">{hidden.includes(metric.key) ? '+' : '✓'}</span></span>
       <strong>{money(metric.latest?.[metric.key] ?? null, metric.key === 'close' ? study.priceCurrency : study.financialCurrency, metric.key === 'eps' || metric.key === 'close')}</strong>
       <small>{metric.latest ? `As of ${chartDate(metric.latest.timestamp)}` : 'Unavailable'}</small>
+      {metric.key !== 'close' && <small>{metric.regressionRate === null ? 'Log-linear fit unavailable' : `${metric.regressionRate.toFixed(1)}%/yr · log-linear fit`}</small>}
     </button>)}</div>
     <div className="plot-meta"><span>TREND COMPARISON</span><span>Logarithmic scales{usesSymlog ? ' · Symmetric log for zero or losses' : ''}</span></div>
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 24, right: 24, bottom: 12, left: 0 }} accessibilityLayer>
@@ -104,9 +108,10 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
         if (!active || !point) return null;
         return <div className="overlay-tooltip"><strong>{chartDate(point.timestamp)}</strong>{visible.filter(metric => point[metric.key] != null).map(metric => <div key={metric.key} style={{ color: metric.color }}><span>{metric.title}</span><b>{money(point[metric.key]!, metric.key === 'close' ? study.priceCurrency : study.financialCurrency, metric.key === 'eps' || metric.key === 'close')}</b></div>)}</div>;
       }}/>
+      {spaced.filter(metric => !hidden.includes(metric.key) && metric.regressionData.length > 0).map(metric => <Line key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={2} strokeOpacity={0.4} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false}/>)}
       {spaced.filter(metric => !hidden.includes(metric.key)).map(metric => <Line key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={metric.key === 'close' ? 1.6 : 3} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : { r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color }} activeDot={{ r: 7, fill: metric.color, stroke: '#fff', strokeWidth: 3 }} connectNulls={false} isAnimationActive={false}/>)}
     </LineChart></ResponsiveContainer></div> : <div className="chart-empty">No comparable history is available. Refresh to try again.</div>}
-    <div className="chart-footnote"><span className="split-status"><i/>Split-normalized EPS & price</span><span>Annual financials · Daily closing prices</span></div>
+    <div className="chart-footnote"><span className="split-status"><i/>Split-normalized EPS & price</span><span>Translucent lines: log-linear regression · Annual financials · Daily closing prices</span></div>
     <p className="overlay-note">Each line has its own logarithmic scale and vertical offset to make its trend clear. Compare direction and shape; slopes do not compare growth rates. Hover for actual values. Missing annual values remain gaps.</p>
     <div className="chart-baselines">{series.filter(metric => metric.baselineDate != null).map(metric => <span key={metric.key}>{metric.title}: base {chartDate(metric.baselineDate!)}</span>)}</div>
   </section>;

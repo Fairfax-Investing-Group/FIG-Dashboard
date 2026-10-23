@@ -1,6 +1,6 @@
 type GrowthPoint = { periodEnd: string; value: number | null };
 
-export function annualGrowth(points: GrowthPoint[]): number | null {
+export function logLinearRegression(points: GrowthPoint[]): { growthRate: number; fitted: { periodEnd: string; value: number }[] } | null {
   const available = points.filter(point => point.value !== null);
   if (available.length < 2 || available.some(point => !Number.isFinite(point.value) || point.value! <= 0)) return null;
   // Fiscal year coordinates preserve missing-year gaps and match annual studies.
@@ -13,7 +13,15 @@ export function annualGrowth(points: GrowthPoint[]): number | null {
   if (variance === 0) return null;
   const covariance = years.reduce((sum, year, index) => sum + (year - meanYear) * (logs[index] - meanLog), 0);
   const result = Math.expm1(covariance / variance) * 100;
-  return Number.isFinite(result) ? result : null;
+  if (!Number.isFinite(result)) return null;
+  const slope = covariance / variance;
+  const fitted = available.map((point, index) => ({ periodEnd: point.periodEnd, value: Math.exp(meanLog + slope * (years[index] - meanYear)) })).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+  if (fitted.some(point => !Number.isFinite(point.value) || point.value <= 0)) return null;
+  return { growthRate: result, fitted };
+}
+
+export function annualGrowth(points: GrowthPoint[]): number | null {
+  return logLinearRegression(points)?.growthRate ?? null;
 }
 
 export function fiveYearEstimate(latest: number | null, forecast: string): number | null {
