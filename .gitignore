@@ -3,3 +3,7 @@ dist/
 *.local
 .DS_Store
 *.tsbuildinfo
+.venv/
+.data/
+__pycache__/
+.env

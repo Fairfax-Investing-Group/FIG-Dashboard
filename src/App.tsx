@@ -1,94 +1,97 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import SearchPage, { type Company } from './SearchPage';
+const StudyPage = lazy(() => import('./StudyPage'));
+import type { Study } from './types';
 
-type Company = { cik: number; name: string; ticker: string; exchange: string | null };
-type Directory = { fields: string[]; data: [number, string, string, string | null][] };
+const readRoute = () => window.location.hash.replace(/^#/, '');
+
+async function readResponse(response: Response): Promise<Study> {
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('The study backend is unavailable. Start the app with npm run dev and try again.');
+  }
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Could not load the study. Please try again.');
+  return data as Study;
+}
 
 export default function App() {
-  const [query, setQuery] = useState('');
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [attempt, setAttempt] = useState(0);
+  const [route, setRoute] = useState(readRoute);
+  const [study, setStudy] = useState<Study | null>(null);
+  const [pending, setPending] = useState<Company | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cache = useRef(new Map<string, Study>());
+  const request = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setStatus('loading');
-    fetch(`${import.meta.env.BASE_URL}companies.json`, { signal: controller.signal })
-      .then(response => {
-        if (!response.ok) throw new Error('Unable to load directory');
-        return response.json() as Promise<Directory>;
-      })
-      .then(directory => {
-        setCompanies(directory.data.map(([cik, name, ticker, exchange]) => ({ cik, name, ticker, exchange })));
-        setStatus('ready');
-      })
-      .catch(error => {
-        if (error.name !== 'AbortError') setStatus('error');
-      });
-    return () => controller.abort();
-  }, [attempt]);
-
-  const search = query.trim().toLowerCase();
-  const matches = useMemo(() => {
-    if (!search) return [];
-    const rank = (company: Company) => {
-      const ticker = company.ticker.toLowerCase();
-      if (ticker === search) return 0;
-      if (ticker.startsWith(search)) return 1;
-      if (company.name.toLowerCase().startsWith(search)) return 2;
-      return 3;
+    const navigate = () => {
+      request.current?.abort();
+      setPending(null);
+      setLoading(false);
+      setError(null);
+      setRoute(readRoute());
     };
-    return companies
-      .filter(company => `${company.ticker} ${company.name}`.toLowerCase().includes(search))
-      .sort((a, b) => rank(a) - rank(b) || a.ticker.localeCompare(b.ticker));
-  }, [companies, search]);
+    window.addEventListener('hashchange', navigate);
+    return () => { window.removeEventListener('hashchange', navigate); request.current?.abort(); };
+  }, []);
 
-  return (
-    <main className="search-page">
-      <header>
-        <div className="wordmark">Stock search</div>
-        <h1>Find a company.</h1>
-        <p>Search by company name or stock ticker.</p>
-      </header>
+  useEffect(() => {
+    if (!route) { setStudy(null); return; }
+    const match = /^\/study\/([a-f0-9-]{36})$/.exec(route);
+    if (!match) { setError('This study link is invalid. Return to search to create a study.'); return; }
+    const cached = cache.current.get(match[1]);
+    if (cached) { setStudy(cached); setLoading(false); return; }
+    const controller = new AbortController();
+    request.current = controller;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/studies/${match[1]}`, { signal: controller.signal })
+      .then(readResponse)
+      .then(data => { cache.current.set(data.id, data); setStudy(data); })
+      .catch(error => { if (error.name !== 'AbortError') setError(error.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [route]);
 
-      <label className="search-label" htmlFor="company-search">Company or ticker</label>
-      <div className="search-field">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
-        <input
-          id="company-search"
-          type="search"
-          placeholder="e.g. Apple or AAPL"
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          autoComplete="off"
-          spellCheck={false}
-          aria-controls="search-results"
-        />
-        {query && <button className="clear-button" onClick={() => setQuery('')} aria-label="Clear search">×</button>}
-      </div>
+  async function createStudy(company: Company) {
+    if (request.current && !request.current.signal.aborted && loading) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setPending(company);
+    setError(null);
+    setLoading(true);
+    try {
+      const data = await fetch('/api/studies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: company.ticker, cik: company.cik }),
+        signal: controller.signal,
+      }).then(readResponse);
+      if (controller.signal.aborted) return;
+      cache.current.set(data.id, data);
+      setStudy(data);
+      setPending(null);
+      window.location.hash = `/study/${data.id}`;
+    } catch (error) {
+      if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Could not create this study.');
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }
 
-      <section id="search-results" aria-label="Search results" aria-busy={status === 'loading'}>
-        <div role="status" aria-live="polite">
-          {status === 'loading' && <p className="message">Loading company directory…</p>}
-          {status === 'error' && <p className="message">Couldn’t load the company directory. <button className="text-button" onClick={() => setAttempt(value => value + 1)}>Try again</button></p>}
-          {status === 'ready' && search && <p className="result-count">{matches.length === 0 ? `No companies found for “${query.trim()}”. Try a different name or ticker.` : `${matches.length.toLocaleString()} ${matches.length === 1 ? 'match' : 'matches'}${matches.length > 20 ? ' · Showing the first 20' : ''}`}</p>}
-        </div>
+  function backToSearch() {
+    request.current?.abort();
+    setPending(null);
+    setError(null);
+    setLoading(false);
+    setStudy(null);
+    window.location.hash = '';
+  }
 
-        {status === 'ready' && !search && <div className="suggestions"><span>Try</span>{['AAPL', 'MSFT', 'NVDA', 'TSLA'].map(ticker => <button key={ticker} onClick={() => setQuery(ticker)}>{ticker}</button>)}</div>}
-
-        {status === 'ready' && search && matches.length > 0 && <ul className="results">
-          {matches.slice(0, 20).map(company => <li key={`${company.cik}-${company.ticker}`}>
-            <a href={`https://www.sec.gov/edgar/browse/?CIK=${company.cik}&owner=exclude`} target="_blank" rel="noreferrer" aria-label={`${company.name}, ${company.ticker}, ${company.exchange || 'Exchange unavailable'}. View SEC filings in a new tab.`}>
-              <span className="company-info"><strong>{company.name}</strong><span>{company.ticker}<span className="separator">·</span>{company.exchange || 'Exchange unavailable'}</span></span>
-              <span className="result-action">View filings <span aria-hidden="true">↗</span></span>
-            </a>
-          </li>)}
-        </ul>}
-      </section>
-
-      <footer>
-        <a href="https://www.sec.gov/files/company_tickers_exchange.json" target="_blank" rel="noreferrer">SEC company directory ↗</a>
-        <span>Local snapshot · US market coverage · No live prices</span>
-      </footer>
-    </main>
-  );
+  if (loading || error) return <main className="search-page state-page">
+    <button className="back-button" onClick={backToSearch}>← Back to search</button>
+    {loading ? <div role="status" className="loading-state"><div className="spinner"/><h1>{pending ? `Studying ${pending.ticker}` : 'Opening your study'}</h1><p>{pending ? 'Fetching annual financials from SEC and ten years of prices through yfinance.' : 'Loading your saved study.'}</p><small>This can take up to a minute. Your study will show any unavailable data.</small></div> : <div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p>{pending && <button className="primary-button" onClick={() => createStudy(pending)}>Try again</button>}</div>}
+  </main>;
+  if (route && study) return <Suspense fallback={<main className="search-page"><p role="status">Loading study charts…</p></main>}><StudyPage study={study} onBack={backToSearch} onRefresh={() => createStudy(study.company)}/></Suspense>;
+  return <SearchPage onSelect={createStudy}/>;
 }
