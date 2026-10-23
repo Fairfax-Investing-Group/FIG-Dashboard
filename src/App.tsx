@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
 const StudyPage = lazy(() => import('./StudyPage'));
-import type { Study } from './types';
+import type { Study, StudyDocument } from './types';
+import { studyView } from './studyDocument';
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
 
@@ -11,7 +12,7 @@ async function readResponse(response: Response): Promise<Study> {
   }
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Could not load the study. Please try again.');
-  return data as Study;
+  return studyView(data as StudyDocument);
 }
 
 export default function App() {

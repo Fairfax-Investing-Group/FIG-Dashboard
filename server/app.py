@@ -18,7 +18,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT / 'dist'), **kwargs)
 
     def json_response(self, status, data):
-        body = json.dumps(data, allow_nan=False).encode()
+        body = json.dumps(data, allow_nan=False, indent=2).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))

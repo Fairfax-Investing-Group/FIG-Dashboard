@@ -1,0 +1,31 @@
+import type { FactSource, Source, Study, StudyDocument } from './types';
+
+/** Adapt the canonical document to chart/table units in one place. */
+export function studyView(document: StudyDocument): Study {
+  if (document.SchemaVersion !== 1) throw new Error('Unsupported study data version. Restart the backend and refresh.');
+  const source = (value: StudyDocument['AnnualData'][number]['Sources']['Sales']): FactSource | null => value ? {
+    concept: value.Concept, filed: value.Filed, accession: value.Accession,
+    unit: value.Unit, start: value.Start, end: value.End,
+  } : null;
+  const upstream = (value: StudyDocument['Metadata']['Sources']['SEC']): Source => ({
+    status: value.Status, url: value.URL, retrievedAt: value.RetrievedAt, error: value.Error,
+  });
+  const adjustment = document.Metadata.EPSAdjustment;
+  const amount = (value: number | null) => value === null ? null : value * 1_000_000;
+  const rate = (value: number | null) => value === null ? null : value * 100;
+  return {
+    id: document.Study.StudyID, createdAt: document.Study.DateCreated,
+    company: { ticker: document.Company.Ticker, name: document.Company.CompanyName, cik: Number(document.Company.CentralIndexKey), exchange: document.Company.ExchangeType },
+    financialCurrency: document.Metadata.FinancialCurrency, priceCurrency: document.Metadata.PriceCurrency,
+    annual: document.AnnualData.map(row => ({
+      periodEnd: row.AsOfDataDate, sales: amount(row.Sales), eps: row.EPS, pretaxProfit: amount(row.PTP),
+      epsSplitFactor: row.EPSSplitFactor,
+      salesSource: source(row.Sources.Sales), epsSource: source(row.Sources.EPS), pretaxProfitSource: source(row.Sources.PTP),
+    })),
+    prices: document.DailyPrices.map(point => ({ date: point.Date, close: point.Close })),
+    sources: { sec: upstream(document.Metadata.Sources.SEC), yfinance: upstream(document.Metadata.Sources.YahooFinance) },
+    warnings: document.Metadata.Warnings,
+    growthRates: { sales: rate(document.ComputedValues.SalesGrowthRate), eps: rate(document.ComputedValues.EPSGrowthRate), pretaxProfit: rate(document.ComputedValues.PTPGrowthRate) },
+    epsAdjustment: { status: adjustment.Status, asOf: adjustment.AsOf ?? undefined, method: adjustment.Method ?? undefined, historyStart: adjustment.HistoryStart ?? undefined, events: adjustment.Events.map(event => ({ date: event.Date, ratio: event.Ratio })) },
+  };
+}

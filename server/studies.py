@@ -17,6 +17,7 @@ import yfinance as yf
 
 from server.financials import normalize_financials
 from server.eps import normalize_eps
+from server.study_schema import normalize_study
 
 ROOT = Path(__file__).resolve().parents[1]
 SEC_LOCK = threading.Lock()
@@ -42,19 +43,23 @@ def connection():
 
 
 def save_study(study):
+    study = normalize_study(study)
     with DB_LOCK, connection() as db:
-        db.execute('INSERT INTO studies (id, payload) VALUES (?, ?)', (study['id'], json.dumps(study, allow_nan=False)))
+        db.execute('INSERT INTO studies (id, payload) VALUES (?, ?)', (study['Study']['StudyID'], json.dumps(study, allow_nan=False)))
 
 
 def get_study(study_id):
     with DB_LOCK, connection() as db:
         row = db.execute('SELECT payload FROM studies WHERE id = ?', (study_id,)).fetchone()
-    return normalized_only(json.loads(row[0])) if row else None
+    if not row:
+        return None
+    study = json.loads(row[0])
+    return normalize_study(study if study.get('SchemaVersion') == 1 else normalized_only(study))
 
 
 def normalized_only(study):
     """Enforce the same EPS policy for new and legacy snapshots."""
-    normalized = study.get('epsAdjustment', {}).get('status') == 'normalized'
+    normalized = (study.get('epsAdjustment') or {}).get('status') == 'normalized'
     hidden = False
     annual = []
     for row in study['annual']:
@@ -200,5 +205,6 @@ def create_study(company):
     if prices and (date.fromisoformat(prices['prices'][0]['date']) - date.fromisoformat(prices['start'])).days > 45:
         study['warnings'].append('Yahoo Finance has less than ten years of price history for this symbol.')
     normalized_only(study)
+    study = normalize_study(study)
     save_study(study)
     return study

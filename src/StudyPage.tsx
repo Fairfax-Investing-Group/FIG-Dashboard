@@ -131,7 +131,7 @@ function FinancialTable({ annual, study }: { annual: AnnualRow[]; study: Study }
         const supported = rows.filter(row => row[metric.key] !== null);
         const first = supported[0];
         const latest = supported.at(-1);
-        const growth = annualGrowth(rows.map(row => ({ periodEnd: row.periodEnd, value: row[metric.key] })));
+        const growth = study.growthRates ? study.growthRates[metric.key] : annualGrowth(rows.map(row => ({ periodEnd: row.periodEnd, value: row[metric.key] })));
         const forecastKey = metric.key === 'sales' || metric.key === 'eps' ? metric.key : null;
         const estimate = forecastKey ? fiveYearEstimate(latest?.[metric.key] ?? null, forecasts[forecastKey]) : null;
         return <tr key={metric.key}>
@@ -160,7 +160,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
   const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);
   return <main className="study-page">
     <div className="study-nav"><button className="back-button" onClick={onBack}>← Company search</button><span>Stock study</span></div>
-    <header className="study-header"><div><div className="ticker-label">{study.company.ticker}<span>·</span>{study.company.exchange || 'Exchange unavailable'}</div><h1>{study.company.name}</h1><p>A decade of business performance and stock price history.</p></div><button className="primary-button" onClick={onRefresh}>↻ Refresh study</button></header>
+    <header className="study-header"><div><div className="ticker-label">{study.company.ticker}<span>·</span>{study.company.exchange || 'Exchange unavailable'}</div><h1>{study.company.name}</h1><p>A decade of business performance and stock price history.</p></div><div className="study-header-actions"><a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a><button className="primary-button" onClick={onRefresh}>↻ Refresh study</button></div></header>
     <div className="study-meta"><span>Created {new Date(study.createdAt).toLocaleString()}</span><span>{study.annual.length} reported fiscal years</span><span>Fresh SEC + yfinance requests on creation</span></div>
     {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={onRefresh}>Retry both sources</button>}</aside>}
     {!study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
