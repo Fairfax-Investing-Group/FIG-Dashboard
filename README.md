@@ -1,6 +1,6 @@
 # Stock Study
 
-React + TypeScript frontend with a local Python backend. Search for a company, then click it to create a study. Creation immediately requests SEC Company Facts and ten years of daily price history using the Python `yfinance` package. There are no sample financial figures or price fallbacks.
+React + TypeScript frontend with a local Python backend. Search for a company, then click it to create a study. Creation immediately requests SEC Company Facts, Yahoo company/statement/analyst data, and ten years of daily price history using the Python `yfinance` package. There are no sample financial figures or fabricated price fallbacks. Expanded pulls can also collect up to three Yahoo industry peer candidates; see [field coverage](docs/data-coverage.md).
 
 ## Setup and run
 
@@ -38,7 +38,7 @@ Each creation/refresh makes new upstream requests and saves a separate snapshot 
 
 The API and new saved snapshots use a versioned document matching the supplied study structure: `Study`, `Company`, `AnnualData`, `QuarterlyData`, `ComputedValues`, `MonthlyPrices`, and related sections. Use **Export JSON** on a study to download it. `GET /api/studies/<id>` returns the same document. Legacy snapshots are adapted on read without upstream requests or rewriting the original snapshot.
 
-Company totals (`Sales`, `PTP`, and their aliases) are in millions. EPS and prices retain per-share units; all rates are decimal fractions (0.182 means 18.2%). Dates use ISO 8601. Split-normalization status, currencies, units, warnings, and source information are under `Metadata`. Unsupported fields are `null`; unavailable collections are empty. The supplied company's values, provider IDs, judgments, notes, and forecasts are never used as defaults. See [the data contract](docs/study-data.md).
+Company totals (`Sales`, `PTP`, and their aliases) are in millions. EPS and prices retain per-share units; all rates are decimal fractions (0.182 means 18.2%). Dates use ISO 8601. Split-normalization status, currencies, units, warnings, and source information are under `Metadata`. Expanded SEC statements, Yahoo company/analyst data, and a bounded industry peer sample populate available fields. Unsupported fields are `null`; unavailable collections are empty. `Metadata.FieldCoverage` lists gaps and provider/user-only fields. Set `STUDY_PEER_LIMIT=0` to disable peers, or 1–5 to bound the sample (default 3). The supplied company's values, provider IDs, judgments, notes, and forecasts are never used as defaults. See [the data contract](docs/study-data.md).
 
 ## Financial normalization
 

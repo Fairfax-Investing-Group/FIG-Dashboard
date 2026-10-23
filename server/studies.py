@@ -18,6 +18,8 @@ import yfinance as yf
 from server.financials import normalize_financials
 from server.eps import normalize_eps
 from server.study_schema import normalize_study
+from server.fundamentals import extract_statements, adjust_statement
+from server.market import fetch_market, fallback_financials
 
 ROOT = Path(__file__).resolve().parents[1]
 SEC_LOCK = threading.Lock()
@@ -86,7 +88,7 @@ def company_for(ticker, cik):
     raise ValueError('Select a company from the search results.')
 
 
-def fetch_financials(cik):
+def sec_json(url):
     global LAST_SEC_REQUEST
     # Limit SEC traffic across concurrent creations. No cache: every new study requests SEC.
     with SEC_LOCK:
@@ -94,18 +96,29 @@ def fetch_financials(cik):
         if delay > 0:
             time.sleep(delay)
         LAST_SEC_REQUEST = time.monotonic()
-    url = f'https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json'
     response = requests.get(url, headers={
         'User-Agent': os.environ.get('SEC_USER_AGENT', 'StockStudy/1.0 (local company research application)'),
         'Accept-Encoding': 'gzip, deflate',
         'Accept': 'application/json',
     }, timeout=(8, 25))
     response.raise_for_status()
-    normalized = normalize_financials(response.json())
+    return response.json()
+
+
+def fetch_financials(cik):
+    url = f'https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json'
+    payload = sec_json(url)
+    normalized = normalize_financials(payload)
+    normalized['statements'] = extract_statements(payload, normalized['currency'], normalized['annual'])
+    try:
+        normalized['submissions'] = sec_json(f'https://data.sec.gov/submissions/CIK{cik:010d}.json')
+    except Exception:
+        normalized['submissions'] = {}
+        normalized['warnings'].append('SEC company metadata could not be loaded; financial statements are preserved.')
     return {**normalized, 'url': url, 'retrievedAt': datetime.now(timezone.utc).isoformat()}
 
 
-def fetch_prices(ticker):
+def fetch_prices(ticker, include_peers=True):
     # Yahoo uses a hyphen for share classes, e.g. BRK.B -> BRK-B.
     symbol = ticker.replace('.', '-')
     end = date.today() + timedelta(days=1)
@@ -121,12 +134,18 @@ def fetch_prices(ticker):
     if history.empty:
         raise ValueError('No stock price history is available for this Yahoo Finance symbol.')
     metadata = stock.history_metadata or {}
-    prices, splits = [], []
+    prices, splits, price_history = [], [], []
     split_history_available = 'Stock Splits' in history.columns
     for index, row in history.iterrows():
         close = float(row['Close'])
         if math.isfinite(close) and start <= index.date() <= today:
             prices.append({'date': index.date().isoformat(), 'close': close})
+        if math.isfinite(close):
+            point = {'date': index.date().isoformat(), 'close': close}
+            for field, column in [('open', 'Open'), ('high', 'High'), ('low', 'Low'), ('volume', 'Volume')]:
+                value = float(row.get(column, float('nan')))
+                point[field] = value if math.isfinite(value) else None
+            price_history.append(point)
         ratio = float(row.get('Stock Splits', 0))
         if ratio != 0:
             if not math.isfinite(ratio) or ratio <= 0:
@@ -137,6 +156,7 @@ def fetch_prices(ticker):
         raise ValueError('Yahoo Finance returned no valid closing prices.')
     return {
         'prices': prices, 'currency': metadata.get('currency'), 'symbol': symbol,
+        'priceHistory': price_history, 'market': fetch_market(stock, include_peers=include_peers),
         'start': start.isoformat(), 'end': today.isoformat(),
         'splits': splits, 'splitHistoryAvailable': split_history_available,
         'splitHistoryStart': history_start.isoformat(),
@@ -160,12 +180,12 @@ def source_error(source, error):
     return f'{source} could not be reached or returned an invalid response. Try refreshing later.'
 
 
-def create_study(company):
+def create_study(company, include_peers=True, persist=True):
     # Start both upstream requests as soon as the study is created.
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {
             'sec': executor.submit(fetch_financials, company['cik']),
-            'yfinance': executor.submit(fetch_prices, company['ticker']),
+            'yfinance': executor.submit(fetch_prices, company['ticker'], include_peers=include_peers),
         }
         results, errors = {}, {}
         for source, future in futures.items():
@@ -174,14 +194,20 @@ def create_study(company):
             except Exception as error:
                 errors[source] = source_error('SEC' if source == 'sec' else 'Yahoo Finance', error)
     sec, prices = results.get('sec'), results.get('yfinance')
+    financials = sec if sec and sec.get('annual') else fallback_financials(prices.get('market', {})) if prices else sec
+    financials = financials or sec
     study = {
         'id': str(uuid.uuid4()), 'company': company,
         'createdAt': datetime.now(timezone.utc).isoformat(),
-        'financialCurrency': sec['currency'] if sec else None,
-        'annual': sec['annual'] if sec else [],
+        'financialCurrency': financials['currency'] if financials else None,
+        'annual': financials['annual'] if financials else [],
         'prices': prices['prices'] if prices else [],
         'priceCurrency': prices['currency'] if prices else None,
-        'warnings': sec['warnings'] if sec else [],
+        'warnings': list(financials['warnings']) if financials else [],
+        'statements': financials.get('statements', {}) if financials else {},
+        'submissions': sec.get('submissions', {}) if sec else {},
+        'priceHistory': prices.get('priceHistory', []) if prices else [],
+        'market': prices.get('market', {}) if prices else {},
         'sources': {
             'sec': {'status': 'ok' if sec else 'error', 'url': f"https://data.sec.gov/api/xbrl/companyfacts/CIK{company['cik']:010d}.json", 'retrievedAt': sec['retrievedAt'] if sec else None, 'error': errors.get('sec')},
             'yfinance': {'status': 'ok' if prices else 'error', 'url': f"https://finance.yahoo.com/quote/{company['ticker'].replace('.', '-')}/history/", 'retrievedAt': prices['retrievedAt'] if prices else None, 'error': errors.get('yfinance')},
@@ -204,7 +230,18 @@ def create_study(company):
             study['warnings'].append('Split history is unavailable. EPS is unavailable; refresh to retry normalization.')
     if prices and (date.fromisoformat(prices['prices'][0]['date']) - date.fromisoformat(prices['start'])).days > 45:
         study['warnings'].append('Yahoo Finance has less than ten years of price history for this symbol.')
+    verified_splits = prices['splits'] if prices and prices.get('splitHistoryAvailable') else None
+    for key in ('annual', 'quarterly'):
+        statements = study['statements'].get(key, {} if key == 'annual' else [])
+        if isinstance(statements, dict):
+            study['statements'][key] = {end: adjust_statement(row, verified_splits, prices['end'] if prices else None, prices.get('splitHistoryStart') if prices else None) for end, row in statements.items()}
+        else:
+            study['statements'][key] = [adjust_statement(row, verified_splits, prices['end'] if prices else None, prices.get('splitHistoryStart') if prices else None) for row in statements]
     normalized_only(study)
     study = normalize_study(study)
-    save_study(study)
+    if include_peers:
+        from server.peers import add_peers
+        add_peers(study, prices.get('market', {}).get('peerSymbols', []) if prices else [])
+    if persist:
+        save_study(study)
     return study

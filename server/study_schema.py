@@ -2,12 +2,15 @@
 from copy import deepcopy
 from datetime import date
 import math
+from numbers import Real
 
 from server.schema_fields import ANNUAL_FIELDS, AVERAGE_FIELDS, COMPANY_FIELDS, SCALE_FIELDS, STUDY_FIELDS
 
 
 def finite(value):
-    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+    if isinstance(value, Real) and not isinstance(value, bool) and math.isfinite(value):
+        return value if type(value) in (int, float) else float(value)
+    return None
 
 
 def growth_rate(annual, key):
@@ -95,7 +98,7 @@ def normalize_study(study):
             'Status': source.get('status', 'error'), 'URL': source.get('url', ''),
             'RetrievedAt': source.get('retrievedAt'), 'Error': source.get('error'),
         }
-    return {
+    document = {
         'SchemaVersion': 1, 'CompanyTK6': None, 'Study': header,
         'ScaleFactors': dict.fromkeys(SCALE_FIELDS), 'Company': identity,
         'AnnualData': annual, 'QuarterlyData': [], 'Peers': [], 'IndustryAverage': [],
@@ -106,7 +109,7 @@ def normalize_study(study):
             **{f'{key}GrowthRate': growth_rate(annual, key) for key in ('Sales', 'EPS', 'PTP')},
         },
         'DailyPrices': daily, 'MonthlyPrices': list(monthly.values()),
-        'LegendSeries': [], 'Notes': [], 'AnalystEstimates': [], 'StudyAudit': None,
+        'LegendSeries': [{'Key': key, 'Name': name, 'Color': color} for key, name, color in [('Sales', 'Sales', '#36a655'), ('EPS', 'Split-normalized EPS', '#d946cf'), ('PTP', 'Pre-tax profit', '#2874d0'), ('Price', 'Split-normalized price', '#64748b')]], 'Notes': [], 'AnalystEstimates': [], 'StudyAudit': None,
         'Metadata': {
             'FinancialCurrency': study.get('financialCurrency'), 'PriceCurrency': study.get('priceCurrency'),
             'Units': {'CompanyTotals': 'millions', 'PerShare': 'currency/share', 'Rates': 'decimal-fraction', 'Dates': 'ISO-8601'},
@@ -120,3 +123,6 @@ def normalize_study(study):
             'UnavailableSections': ['QuarterlyData', 'Peers', 'IndustryAverage', 'PeerGroupAverage', 'AnalystEstimates', 'ScaleFactors'],
         },
     }
+
+    from server.enrichment import apply_enrichment
+    return apply_enrichment(document, study)

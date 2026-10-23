@@ -50,7 +50,8 @@ class StudySchemaTests(unittest.TestCase):
         self.assertEqual(document['QuarterlyData'], [])
         self.assertEqual(document['AnalystEstimates'], [])
         self.assertIsNone(document['Study']['ProjSalesGrowthRate'])
-        self.assertIsNone(document['ScaleFactors']['EPS'])
+        self.assertEqual(document['ScaleFactors']['EPS'], 0)
+        self.assertIn('not vendor', document['Metadata']['ScaleFactorsMethod'])
 
     def test_monthly_prices_are_last_observed_closes_not_ohlc(self):
         document = normalize_study(snapshot())

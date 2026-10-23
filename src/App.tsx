@@ -91,7 +91,7 @@ export default function App() {
 
   if (loading || error) return <main className="search-page state-page">
     <button className="back-button" onClick={backToSearch}>← Back to search</button>
-    {loading ? <div role="status" className="loading-state"><div className="spinner"/><h1>{pending ? `Studying ${pending.ticker}` : 'Opening your study'}</h1><p>{pending ? 'Fetching annual financials from SEC and ten years of prices through yfinance.' : 'Loading your saved study.'}</p><small>This can take up to a minute. Your study will show any unavailable data.</small></div> : <div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p>{pending && <button className="primary-button" onClick={() => createStudy(pending)}>Try again</button>}</div>}
+    {loading ? <div role="status" className="loading-state"><div className="spinner"/><h1>{pending ? `Studying ${pending.ticker}` : 'Opening your study'}</h1><p>{pending ? 'Gathering annual and quarterly financials, prices, analyst estimates, and industry peers.' : 'Loading your saved study.'}</p><small>Expanded studies can take a few minutes. Your study will show any unavailable data.</small></div> : <div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p>{pending && <button className="primary-button" onClick={() => createStudy(pending)}>Try again</button>}</div>}
   </main>;
   if (route && study) return <Suspense fallback={<main className="search-page"><p role="status">Loading study charts…</p></main>}><StudyPage study={study} onBack={backToSearch} onRefresh={() => createStudy(study.company)}/></Suspense>;
   return <SearchPage onSelect={createStudy}/>;
