@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "dev:client": "vite --host 127.0.0.1",
-    "test": ".venv/bin/python -m unittest discover -s server/tests",
+    "test": ".venv/bin/python -m unittest discover -s server/tests && node --test scripts/financialMath.test.mjs",
     "start": ".venv/bin/python -m server.app"
   },
   "dependencies": {

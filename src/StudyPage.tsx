@@ -131,19 +131,19 @@ function FinancialTable({ annual, study }: { annual: AnnualRow[]; study: Study }
         const supported = rows.filter(row => row[metric.key] !== null);
         const first = supported[0];
         const latest = supported.at(-1);
-        const growth = first && latest ? annualGrowth(first[metric.key], latest[metric.key], first.periodEnd, latest.periodEnd) : null;
+        const growth = annualGrowth(rows.map(row => ({ periodEnd: row.periodEnd, value: row[metric.key] })));
         const forecastKey = metric.key === 'sales' || metric.key === 'eps' ? metric.key : null;
         const estimate = forecastKey ? fiveYearEstimate(latest?.[metric.key] ?? null, forecasts[forecastKey]) : null;
         return <tr key={metric.key}>
           <th scope="row">{labels[metric.key]}</th>
           {rows.map(row => <td key={row.periodEnd}><SourceLink source={row[`${metric.key}Source`]} cik={study.company.cik} value={row[metric.key] === null ? null : row[metric.key]! / scale} currency={null} eps={metric.key === 'eps'}/></td>)}
-          <td className="calculated-column" title={first && latest ? `Compound annual growth: ${displayDate(first.periodEnd)} to ${displayDate(latest.periodEnd)}` : undefined}>{growth === null ? '—' : `${growth.toFixed(1)}%`}</td>
+          <td className="calculated-column" title={first && latest ? `Log-linear regression across available fiscal years: ${displayDate(first.periodEnd)} to ${displayDate(latest.periodEnd)}` : undefined}>{growth === null ? '—' : `${growth.toFixed(1)}%`}</td>
           <td className="forecast-cell">{forecastKey ? <input type="number" step="0.1" min="-100" value={forecasts[forecastKey]} placeholder="—" aria-label={`${metric.title} annual forecast percentage`} onChange={event => setForecasts(current => ({ ...current, [forecastKey]: event.target.value }))}/> : '—'}</td>
           <td className="estimate-cell">{money(estimate === null ? null : estimate / scale, null, metric.key === 'eps')}</td>
         </tr>;
       })}</tbody>
     </table>{!rows.length && <p className="table-empty">Annual financials could not be loaded for this company.</p>}</div>
-    <p className="table-note">Sales and pre-tax profit are in millions; EPS is split-normalized. Click historical values for SEC filings. Growth is compound annual growth between the first and last available values; unavailable for nonpositive endpoints. Enter annual sales and EPS forecasts to calculate five-year estimates from each metric’s latest available year. Forecasts are your assumptions. — means unavailable.</p>
+    <p className="table-note">Sales and pre-tax profit are in millions; EPS is split-normalized. Click historical values for SEC filings. Growth uses log-linear regression across all available fiscal years. It requires at least two years of positive values; missing years are skipped and zero or negative values make growth unavailable. Enter annual sales and EPS forecasts to calculate five-year estimates from each metric’s latest available year. Forecasts are your assumptions. — means unavailable.</p>
   </section>;
 }
 
