@@ -16,6 +16,7 @@ import requests
 import yfinance as yf
 
 from server.financials import normalize_financials
+from server.eps import normalize_eps
 
 ROOT = Path(__file__).resolve().parents[1]
 SEC_LOCK = threading.Lock()
@@ -48,7 +49,28 @@ def save_study(study):
 def get_study(study_id):
     with DB_LOCK, connection() as db:
         row = db.execute('SELECT payload FROM studies WHERE id = ?', (study_id,)).fetchone()
-    return json.loads(row[0]) if row else None
+    return normalized_only(json.loads(row[0])) if row else None
+
+
+def normalized_only(study):
+    """Enforce the same EPS policy for new and legacy snapshots."""
+    normalized = study.get('epsAdjustment', {}).get('status') == 'normalized'
+    hidden = False
+    annual = []
+    for row in study['annual']:
+        factor = row.get('epsSplitFactor')
+        verified = normalized and isinstance(factor, (int, float)) and math.isfinite(factor) and factor > 0
+        if not verified:
+            hidden = hidden or row.get('eps') is not None or row.get('epsReported') is not None
+            row = {**row, 'eps': None, 'epsSplitFactor': None}
+        annual.append(row)
+    study['annual'] = annual
+    study['warnings'] = [warning for warning in study['warnings'] if 'EPS remains as reported' not in warning]
+    if hidden:
+        warning = 'Split-normalized EPS is unavailable for some periods. Refresh to retry; unverified EPS is hidden.'
+        if warning not in study['warnings']:
+            study['warnings'].append(warning)
+    return study
 
 
 def company_for(ticker, cik):
@@ -88,20 +110,31 @@ def fetch_prices(ticker):
     except ValueError:  # Leap day.
         start = today.replace(year=today.year - 10, day=28)
     stock = yf.Ticker(symbol)
-    history = stock.history(start=start.isoformat(), end=end.isoformat(), interval='1d', auto_adjust=False, actions=False, timeout=20, raise_errors=True)
+    # Include the start of the oldest financial year, even when before the price chart window.
+    history_start = min(start, date(today.year - 10, 1, 1))
+    history = stock.history(start=history_start.isoformat(), end=end.isoformat(), interval='1d', auto_adjust=False, actions=True, timeout=20, raise_errors=True)
     if history.empty:
         raise ValueError('No stock price history is available for this Yahoo Finance symbol.')
     metadata = stock.history_metadata or {}
-    prices = []
+    prices, splits = [], []
+    split_history_available = 'Stock Splits' in history.columns
     for index, row in history.iterrows():
         close = float(row['Close'])
-        if math.isfinite(close):
+        if math.isfinite(close) and start <= index.date() <= today:
             prices.append({'date': index.date().isoformat(), 'close': close})
+        ratio = float(row.get('Stock Splits', 0))
+        if ratio != 0:
+            if not math.isfinite(ratio) or ratio <= 0:
+                split_history_available = False
+            else:
+                splits.append({'date': index.date().isoformat(), 'ratio': ratio})
     if not prices:
         raise ValueError('Yahoo Finance returned no valid closing prices.')
     return {
         'prices': prices, 'currency': metadata.get('currency'), 'symbol': symbol,
         'start': start.isoformat(), 'end': today.isoformat(),
+        'splits': splits, 'splitHistoryAvailable': split_history_available,
+        'splitHistoryStart': history_start.isoformat(),
         'url': f'https://finance.yahoo.com/quote/{symbol}/history/',
         'retrievedAt': datetime.now(timezone.utc).isoformat(),
     }
@@ -149,7 +182,23 @@ def create_study(company):
             'yfinance': {'status': 'ok' if prices else 'error', 'url': f"https://finance.yahoo.com/quote/{company['ticker'].replace('.', '-')}/history/", 'retrievedAt': prices['retrievedAt'] if prices else None, 'error': errors.get('yfinance')},
         },
     }
+    if sec and prices and prices.get('splitHistoryAvailable'):
+        try:
+            study['annual'] = normalize_eps(study['annual'], prices['splits'], prices['end'], prices['splitHistoryStart'])
+            study['epsAdjustment'] = {
+                'status': 'normalized', 'asOf': prices['end'],
+                'method': 'splits-after-source-filing', 'events': prices['splits'],
+                'historyStart': prices['splitHistoryStart'],
+            }
+        except (ValueError, TypeError, KeyError, OverflowError, ZeroDivisionError):
+            study['epsAdjustment'] = {'status': 'unavailable'}
+            study['warnings'].append('Split normalization failed. EPS is unavailable; refresh to retry.')
+    else:
+        study['epsAdjustment'] = {'status': 'unavailable'}
+        if sec and any(row.get('eps') is not None for row in study['annual']):
+            study['warnings'].append('Split history is unavailable. EPS is unavailable; refresh to retry normalization.')
     if prices and (date.fromisoformat(prices['prices'][0]['date']) - date.fromisoformat(prices['start'])).days > 45:
         study['warnings'].append('Yahoo Finance has less than ten years of price history for this symbol.')
+    normalized_only(study)
     save_study(study)
     return study

@@ -28,6 +28,7 @@ The default identifies this local research app. SEC may block requests without a
 
 - Sales, diluted EPS, and pre-tax profit: up to ten available **full fiscal years** within the last decade, from SEC Company Facts.
 - Price: trailing ten years of daily Yahoo Finance closing prices, fetched with `yfinance.Ticker.history(auto_adjust=False)`. Yahoo's close reflects splits but is not adjusted for dividends. The price chart shows its actual coverage and quote currency.
+- Charts use logarithmic Y-axes. A series containing zero or losses uses symmetric log so those values remain visible; each chart labels its scale.
 - A financial table underneath the four charts, with exact values, fiscal period end dates, sort order, and links to source filings. Hover a value to inspect its SEC concept and filing date.
 - Source retrieval timestamps, missing-data notices, and retry/refresh controls.
 
@@ -39,7 +40,7 @@ Each creation/refresh makes new upstream requests and saves a separate snapshot 
 
 Standard US GAAP and IFRS revenue, diluted EPS, and income-before-tax concepts are selected in documented priority order. Within a selected concept/period, the most recently filed value is used, including restated comparatives. Period dates and original concept/unit/accession/filing date remain attached to each value. One reporting currency is used for the financial series; currencies are never added or converted. Pre-tax profit generally covers continuing operations, depending on the issuer's standard tag.
 
-EPS is **reported diluted EPS**, not uniformly rebased for subsequent stock splits. Older values can use different share bases; this is called out in the chart and table. Missing facts remain null and render as gaps/“—”, never zero. Companies reporting only custom XBRL concepts, some financial institutions, funds, or issuers with limited filing history may have incomplete data. Source failures preserve whichever other data is available.
+EPS is **split-normalized diluted EPS** in both the chart and table. The yfinance request includes split events from January 1 of the oldest financial year through study creation. The calculation treats each SEC source filing as already reflecting splits through its filing date and divides its EPS by the cumulative new-shares/old-shares ratio of later splits (including reverse splits). This avoids double-adjusting restated comparatives. The filing date is the share-basis reference; unusual recapitalizations or changes already reflected ahead of their split effective date may require manual verification. Original SEC EPS and the applied divisor are retained internally for repeatable normalization; the interface displays only split-normalized EPS. Missing or invalid split history, missing source filing dates, and filing dates outside split-history coverage produce unavailable EPS, never a reported-value fallback. This rule also applies when loading older saved studies; refresh to obtain normalized EPS. Chart points, latest values, tooltips, and table cells all use the same normalized series. Stock prices use Yahoo’s split-adjusted close; total sales and pre-tax profit are unaffected by stock splits. Missing facts remain null and render as gaps/“—”, never zero. Companies reporting only custom XBRL concepts, some financial institutions, funds, or issuers with limited filing history may have incomplete data. Source failures preserve whichever other data is available.
 
 ## Checks and production
 
@@ -49,7 +50,7 @@ npm run build
 npm start
 ```
 
-`npm test` checks annual-period selection, restatements, unit/currency handling, missing data, snapshot persistence, and fresh requests on every creation. `npm start` serves the built `dist/` frontend and API together at http://127.0.0.1:8000. `npm run preview` previews the frontend only and needs a separately running backend. This is a local app; remote hosting requires a Python-capable backend host.
+`npm test` checks annual-period selection, restatements, unit/currency handling, missing data, snapshot persistence, fresh requests on every creation, forward/reverse splits, preservation of already-restated EPS, and normalization idempotence. `npm start` serves the built `dist/` frontend and API together at http://127.0.0.1:8000. `npm run preview` previews the frontend only and needs a separately running backend. This is a local app; remote hosting requires a Python-capable backend host.
 
 ## Sources
 
