@@ -242,3 +242,20 @@ footer a:hover { text-decoration: underline; }
 .export-button:hover { background:#f5f8f6; border-color:#b9cbbf; }
 @media(max-width:800px) { .study-header-actions { flex-wrap:wrap; justify-content:flex-end; } .export-button { padding:9px 11px; font-size:11px; } }
 @media(max-width:540px) { .study-header-actions { justify-content:flex-start; } }
+
+.line-toggles { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+.line-toggles button { display:inline-flex; align-items:center; gap:5px; padding:5px 7px; border:1px solid #dce6df; border-radius:5px; background:white; color:#53685b; font-size:10px; }
+.line-toggles button i { width:14px; height:2px; border-radius:0; box-shadow:none; }
+.line-toggles button[aria-pressed=false] { color:#9ca6a0; background:#f0f3f1; text-decoration:line-through; }
+.line-toggles button:hover { border-color:#a1b6a9; }
+.line-inspector-controls { display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin:0 0 12px; }
+.line-inspector-controls label { display:flex; flex-wrap:wrap; align-items:center; gap:9px; font-size:11px; color:#68796e; }
+.line-inspector-controls select { max-width:100%; min-height:34px; border:1px solid #dce5df; border-radius:6px; background:#fff; color:#344e3e; font:inherit; padding:6px 26px 6px 9px; }
+.line-inspector-controls button { min-height:34px; border:1px solid #dce5df; border-radius:6px; background:#f7faf8; padding:7px 10px; font-size:11px; color:#526b5a; }
+.line-inspector-controls button:disabled { opacity:.4; cursor:default; }
+.line-inspector-controls select:focus-visible { outline:2px solid #2563eb; outline-offset:3px; }
+.line-inspector-status { display:flex; flex-wrap:wrap; align-items:center; gap:7px; min-height:28px; color:#87958c; font-size:10px; line-height:1.8; margin-bottom:15px; }
+.line-inspector-status i { width:7px; height:7px; border-radius:50%; }
+.line-inspector-status strong { color:#52675a; font-weight:500; }
+.tooltip-observed-date { display:block; color:#94a099; font-size:9px; margin-top:3px; }
+@media(max-width:640px) { .line-inspector-controls label { width:100%; } .line-inspector-controls select { flex:1; min-width:0; } .line-inspector-status { padding:0 4px; } }
