@@ -35,7 +35,7 @@ export default function SaveStudy({ study }: { study: Study }) {
     } finally { lock.current = false; setBusy(false); }
   }
   return <section className="study-save" aria-label="Save study">
-    {!readOnly && <button type="button" className="export-button" onClick={() => auth.session ? void save() : setShowLogin(value => !value)} disabled={busy || auth.loading || !study.company.cik}>{busy ? 'Saving…' : !auth.session ? 'Log in to save' : own ? 'Save changes' : 'Save study'}</button>}
+    {!readOnly && <button type="button" className="export-button" title={!auth.session ? 'Saving is optional; you can view and analyze the study without logging in.' : undefined} onClick={() => auth.session ? void save() : setShowLogin(value => !value)} disabled={busy || auth.loading || !study.company.cik}>{busy ? 'Saving…' : !auth.session ? 'Log in to save' : own ? 'Save changes' : 'Save study'}</button>}
     {readOnly && <span>Read-only · Only the creator can edit this study.</span>}
     {!auth.session && !readOnly && showLogin && <div className="study-save-login"><LoginForm compact/></div>}
     <span role="status">{saved && <>By {own ? auth.session?.user.email || saved.user_id : saved.user_id} · Made {date(saved.study_made_at ?? saved.created_at)} · Saved {date(saved.updated_at)}</>}</span>
