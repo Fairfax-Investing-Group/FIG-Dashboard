@@ -1,6 +1,6 @@
 # Stock Study
 
-React + TypeScript frontend with a local Python backend. Search for a company, then click it to create a study. Creation immediately requests SEC Company Facts, Yahoo company/statement/analyst data, and ten years of daily price history using the Python `yfinance` package. There are no sample financial figures or fabricated price fallbacks. Expanded pulls can also collect up to three Yahoo industry peer candidates; see [field coverage](docs/data-coverage.md).
+React + TypeScript frontend with a local Python backend. Search for a company, then click it to create a study. Fundamentals and weekly prices load first, with sections appearing independently. Daily prices, expanded statements, analyst data, and peers complete in the background. There are no sample financial figures or fabricated price fallbacks. Expanded pulls can also collect up to three Yahoo industry peer candidates; see [field coverage](docs/data-coverage.md).
 
 ## Setup and run
 
@@ -46,6 +46,8 @@ See [Supabase setup and storage contract](docs/supabase.md).
 - Source retrieval timestamps, missing-data notices, and retry/refresh controls.
 
 Each creation/refresh makes new upstream requests and saves a separate snapshot in `.data/studies.sqlite3` (ignored by Git). Reloading a study's `#/study/<id>` URL reads that snapshot rather than silently fetching new data. Refresh creates and opens a new snapshot. These local URLs work while this backend and its database are available; snapshots are not cloud-shared. Set `STUDY_DB` to change the database path.
+
+Search starts the first match's speculative request immediately and the next four after 500 ms without typing. After 25 ms without typing, the closest match's Fundamentals page also mounts hidden with its known identity and live quote. Selecting that match reveals the same mounted page; only one page is prepared at a time. Selecting a company reuses its work and discards the other selections. The browser receives a slim study projection; complete data remains available through the default API and export. See [loading implementation and measured results](docs/loading-performance.md).
 
 ## Normalized study JSON
 

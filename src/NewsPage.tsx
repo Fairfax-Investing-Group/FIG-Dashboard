@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Article = { id: string; title: string; url: string; publisher: string; publishedAt: string; summary: string; thumbnail?: string | null };
 type NewsFeed = { articles: Article[]; retrievedAt: string; nextCount: number | null };
@@ -17,8 +17,11 @@ export default function NewsPage({ ticker, active }: { ticker: string; active: b
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [refresh, setRefresh] = useState(0);
   const [count, setCount] = useState(25);
+  const lastLoad = useRef<{ ticker: string; count: number; refresh: number; time: number } | null>(null);
   useEffect(() => {
     if (!active) return;
+    const last = lastLoad.current;
+    if (last && last.ticker === ticker && last.count === count && last.refresh === refresh && Date.now() - last.time < 60_000) return;
     const controller = new AbortController();
     setStatus('loading');
     async function load() {
@@ -35,6 +38,7 @@ export default function NewsPage({ ticker, active }: { ticker: string; active: b
             return { ...result, nextCount: additional.length ? result.nextCount : null,
               articles: [...previous.articles, ...additional].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)) };
           });
+          lastLoad.current = { ticker, count, refresh, time: Date.now() };
           setStatus('ok');
         }
       } catch {

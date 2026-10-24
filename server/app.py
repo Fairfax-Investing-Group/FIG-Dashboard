@@ -11,10 +11,10 @@ import re
 import threading
 
 from server.studies import ROOT, company_for, create_study, get_study, complete_study
-from server.study_preload import start_preload
+from server.study_preload import start_preload, clear_unselected_preloads
 from server.quotes import get_quote
 from server.news import get_news
-from server.fundamentals_view import fundamentals_view
+from server.fundamentals_view import fundamentals_view, study_view
 from server.portfolio import get_portfolio, start_portfolio_scheduler
 
 STUDY_SLOTS = threading.BoundedSemaphore(4)
@@ -38,7 +38,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT / 'dist'), **kwargs)
 
     def json_response(self, status, data):
-        body = json.dumps(data, allow_nan=False, indent=2).encode()
+        body = json.dumps(data, allow_nan=False, separators=(',', ':')).encode()
         compressed = len(body) >= 1024 and accepts_gzip(self.headers.get('Accept-Encoding', ''))
         if compressed:
             body = gzip.compress(body, compresslevel=1, mtime=0)
@@ -55,7 +55,7 @@ class Handler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def stream_study(self, company, study_id):
+    def stream_study(self, company, study_id, preload_group=None, completion=False):
         # Flush each small NDJSON event, including its gzip synchronization marker.
         # Whole-response buffering would hold back the early sections.
         self.send_response(200)
@@ -77,7 +77,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             value = {'type': kind}
             if document is not None:
-                value['document'] = fundamentals_view(document)
+                value['document'] = study_view(document) if completion else fundamentals_view(document)
             if error is not None:
                 value['error'] = error
             try:
@@ -90,8 +90,11 @@ class Handler(SimpleHTTPRequestHandler):
                 # Persist the study even if the user navigated away mid-stream.
                 connected = False
         try:
-            study = create_study(company, fundamentals_only=True, study_id=study_id,
-                                 on_progress=lambda document: event('progress', document))
+            if completion:
+                study = complete_study(study_id, on_progress=lambda document: event('progress', document))
+            else:
+                study = create_study(company, fundamentals_only=True, study_id=study_id,
+                                     on_progress=lambda document: event('progress', document), preload_group=preload_group)
             event('ready', study)
         except Exception:
             traceback.print_exc()
@@ -131,6 +134,8 @@ class Handler(SimpleHTTPRequestHandler):
         match = re.fullmatch(r'/api/studies/([a-f0-9-]{36})', path)
         if match:
             study = get_study(match.group(1))
+            if study and parse_qs(urlparse(self.path).query).get('view') == ['study']:
+                return self.json_response(200, study_view(study))
             if study and study['Metadata'].get('DataStage') == 'fundamentals' and parse_qs(urlparse(self.path).query).get('view') == ['fundamentals']:
                 study = fundamentals_view(study)
             return self.json_response(200, study) if study else self.json_response(404, {'error': 'Study not found. Return to search to create one.'})
@@ -142,7 +147,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         completion = re.fullmatch(r'/api/studies/([a-f0-9-]{36})/complete', path)
         preload = path == '/api/studies/preload'
-        if path != '/api/studies' and not completion and not preload:
+        clear_preloads = path == '/api/studies/preload/clear'
+        if path != '/api/studies' and not completion and not preload and not clear_preloads:
             return self.json_response(404, {'error': 'API route not found.'})
         # JSON requests only; no cross-origin API access is enabled.
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
@@ -162,21 +168,32 @@ class Handler(SimpleHTTPRequestHandler):
             study_id = body.get('studyId')
             if study_id is not None and (not isinstance(study_id, str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', study_id)):
                 raise ValueError('Invalid study ID.')
+            preload_group = body.get('preloadGroup')
+            if (clear_preloads and preload_group is None) or (preload_group is not None and (not isinstance(preload_group, str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', preload_group))):
+                raise ValueError('Invalid preload group.')
             company = company_for(body['ticker'], body['cik']) if not completion else None
         except (ValueError, TypeError):
             return self.json_response(400, {'error': 'Choose a valid company from the search results.'})
+        if clear_preloads:
+            return self.json_response(200, {'cleared': clear_unselected_preloads(preload_group, company)})
         if preload:
-            accepted = start_preload(company)
+            priority = body.get('priority')
+            if priority is not None and (type(priority) is not int or not 0 <= priority <= 4):
+                return self.json_response(400, {'error': 'Invalid preload priority.'})
+            accepted = start_preload(company, preload_group, priority)
             return self.json_response(202 if accepted else 429, {'preloading': accepted})
         slots = COMPLETION_SLOTS if completion else STUDY_SLOTS
         if not slots.acquire(blocking=False):
             return self.json_response(429, {'error': 'Several studies are being created. Please try again shortly.'})
         try:
             if completion:
-                return self.json_response(200, complete_study(completion.group(1)))
+                if 'application/x-ndjson' in self.headers.get('Accept', ''):
+                    return self.stream_study(None, completion.group(1), completion=True)
+                study = complete_study(completion.group(1))
+                return self.json_response(200, study_view(study) if parse_qs(urlparse(self.path).query).get('view') == ['study'] else study)
             if stage == 'fundamentals' and 'application/x-ndjson' in self.headers.get('Accept', ''):
-                return self.stream_study(company, study_id)
-            study = create_study(company, fundamentals_only=stage == 'fundamentals', study_id=study_id)
+                return self.stream_study(company, study_id, preload_group)
+            study = create_study(company, fundamentals_only=stage == 'fundamentals', study_id=study_id, preload_group=preload_group)
             return self.json_response(201, fundamentals_view(study) if stage == 'fundamentals' else study)
         except LookupError:
             return self.json_response(404, {'error': 'Study not found.'})

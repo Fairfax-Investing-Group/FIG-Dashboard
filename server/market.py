@@ -1,5 +1,6 @@
 """Optional Yahoo company/analyst/industry observations; price failures stay isolated."""
 from datetime import date, datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 import os
 import yfinance as yf
 
@@ -32,7 +33,7 @@ def estimates(profile, earnings, revenue, today=None):
     return records, company
 
 
-def statement_fallbacks(stock, profile):
+def statement_fallbacks(stock, profile, stock_factory=None):
     currency = profile.get('financialCurrency')
     result, failures = {'annual': {}, 'quarterly': {}}, []
     if not currency:
@@ -42,10 +43,12 @@ def statement_fallbacks(stock, profile):
         'income': {'InterestExpense': 'InterestExpense', 'Sales': 'TotalRevenue', 'PTP': 'PretaxIncome', 'NetIncome': 'NetIncomeCommonStockholders', 'CostofRevenue': 'CostOfRevenue', 'OperatingIncome': 'OperatingIncome', 'IncomeTax': 'TaxProvision'},
         'cashflow': {'OperatingCashFlow': 'OperatingCashFlow', 'CapitalExpenditures': 'CapitalExpenditure'},
     }
-    for name, freq in [('annual', 'yearly'), ('quarterly', 'quarterly')]:
-        for category in ('balance', 'income', 'cashflow'):
+    def load_category(category):
+        worker = stock_factory() if stock_factory else stock
+        result, failures = {'annual': {}, 'quarterly': {}}, []
+        for name, freq in [('annual', 'yearly'), ('quarterly', 'quarterly')]:
             try:
-                frame = stock.get_balance_sheet(freq=freq) if category == 'balance' else stock.get_income_stmt(freq=freq) if category == 'income' else stock.get_cash_flow(freq=freq)
+                frame = worker.get_balance_sheet(freq=freq) if category == 'balance' else worker.get_income_stmt(freq=freq) if category == 'income' else worker.get_cash_flow(freq=freq)
                 for column in frame.columns:
                     end = column.date().isoformat()
                     row = result[name].setdefault(end, {'Values': {}, 'Sources': {}})
@@ -63,6 +66,21 @@ def statement_fallbacks(stock, profile):
                             row.setdefault('PerShareSources', {})[target] = {'Provider': 'Yahoo Finance', 'Field': key, 'End': end, 'Unit': f'{currency}/shares' if target == 'EPS' else 'shares'}
             except Exception:
                 failures.append(f'{name} {category} statement fallback')
+        return result, failures
+
+    if stock_factory:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            categories = list(executor.map(load_category, ('balance', 'income', 'cashflow')))
+    else:
+        categories = [load_category(category) for category in ('balance', 'income', 'cashflow')]
+    for category, errors in categories:
+        failures.extend(errors)
+        for frequency, periods in category.items():
+            for end, values in periods.items():
+                row = result[frequency].setdefault(end, {})
+                for section, fields in values.items():
+                    row.setdefault(section, {}).update(fields)
+
     return result, failures
 
 
@@ -117,21 +135,31 @@ def fetch_market(stock, include_peers=True, fundamentals_only=False, profile=Non
         return {'profile': profile, 'warnings': warnings,
                 'source': {'Status': 'ok' if profile else 'error', 'URL': f'https://finance.yahoo.com/quote/{stock.ticker}/',
                            'RetrievedAt': datetime.now(timezone.utc).isoformat(), 'Error': ', '.join(errors) or None}}
-    try:
-        earnings, revenue = stock.get_earnings_estimate(), stock.get_revenue_estimate()
-        analyst, company = estimates(profile, earnings, revenue)
-        if not analyst:
-            warnings.append('Yahoo annual analyst estimates are unavailable or lack a fiscal-year anchor.')
-    except Exception:
-        errors.append('analyst estimates')
-    fallbacks, statement_errors = statement_fallbacks(stock, profile)
-    errors.extend(statement_errors)
-    limit = peer_limit()
-    if include_peers and limit and profile.get('industryKey'):
+    def analyst_data():
+        # These share one yfinance analysis response, so keep this pair sequential.
+        return estimates(profile, stock.get_earnings_estimate(), stock.get_revenue_estimate())
+
+    def peers():
+        limit = peer_limit()
+        if not include_peers or not limit or not profile.get('industryKey'):
+            return []
+        top = yf.Industry(profile['industryKey']).top_companies
+        return [str(symbol) for symbol in top.index if str(symbol) != stock.ticker][:limit + 2] if top is not None else []
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        analyst_task = executor.submit(analyst_data)
+        statements_task = executor.submit(statement_fallbacks, stock, profile, stock_factory=lambda: yf.Ticker(stock.ticker))
+        peers_task = executor.submit(peers)
         try:
-            top = yf.Industry(profile['industryKey']).top_companies
-            if top is not None:
-                peer_symbols = [str(symbol) for symbol in top.index if str(symbol) != stock.ticker][:limit + 2]
+            analyst, company = analyst_task.result()
+            if not analyst:
+                warnings.append('Yahoo annual analyst estimates are unavailable or lack a fiscal-year anchor.')
+        except Exception:
+            errors.append('analyst estimates')
+        fallbacks, statement_errors = statements_task.result()
+        errors.extend(statement_errors)
+        try:
+            peer_symbols = peers_task.result()
         except Exception:
             errors.append('industry peer candidates')
     if errors:

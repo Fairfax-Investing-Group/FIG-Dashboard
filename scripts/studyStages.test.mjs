@@ -26,6 +26,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
   let creates = 0;
   globalThis.fetch = (url, options) => {
     calls.push({ url, options });
+    if (url === '/api/studies/preload/clear') return Promise.resolve(response({ cleared: 4 }));
     if (url === '/api/studies/preload') return Promise.resolve(response({ preloading: true }));
     if (url === '/api/studies?stage=fundamentals') {
       creates++;
@@ -33,7 +34,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
       else secondId = JSON.parse(options.body).studyId;
       return creates === 1 ? core.promise : Promise.resolve(response(doc(secondId, 'fundamentals')));
     }
-    if (url.endsWith('/complete')) {
+    if (url.includes('/complete')) {
       assert.ok(document.querySelector('[data-study]'), 'Optional requests must wait for the study page to mount');
       const pending = deferred();
       completions.push(pending);
@@ -52,11 +53,11 @@ test('Fundamentals mounts before completion; background retries and merges prese
         build.onLoad({ filter: /.*/, namespace: 'test-pages' }, args => ({ loader: 'jsx', contents: args.path === './StudyPage'
           ? `import React, {useEffect,useState} from 'react'; window.studyCodeLoaded = true; export default function Page(props) {
               const [edit,setEdit] = useState('');
-              useEffect(() => props.onFundamentalsReady(props.study.id), [props.study.id,props.onFundamentalsReady]);
+              useEffect(() => props.onFundamentalsReady?.(props.study.id), [props.study.id,props.onFundamentalsReady]);
               return <main data-study={props.study.id}><h1>{props.study.company.name}</h1><input aria-label="Forecast" value={edit} onChange={e=>setEdit(e.target.value)}/><span data-status>{props.detailsStatus}</span><span data-primary>{props.fundamentalsStatus}</span><button onClick={props.onBack}>Back</button><button onClick={props.onRetryDetails}>Retry details</button></main>;
             }`
           : args.path === './SearchPage'
-            ? `import React from 'react'; export default function Search({onSelect,onPreload}) { const company={ticker:'TEST',cik:123,name:'Test company'}; return <><button onClick={()=>onPreload(company)}>Highlight result</button><button onClick={()=>onSelect(company)}>Create study</button></>; }`
+            ? `import React from 'react'; export default function Search({onSelect,onPreload,onPreparePage}) { const company={ticker:'TEST',cik:123,name:'Test company'}; return <><button onClick={()=>{onPreload(company);onPreparePage(company)}}>Highlight result</button><button onClick={()=>onSelect(company)}>Create study</button></>; }`
             : `export default function Login() { return null; }` }));
       },
     }] });
@@ -70,11 +71,23 @@ test('Fundamentals mounts before completion; background retries and merges prese
     await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(App))));
     await click('Highlight result');
     assert.equal(calls[0].url, '/api/studies/preload');
-    assert.deepEqual(JSON.parse(calls[0].options.body), { ticker: 'TEST', cik: 123 });
-    assert.equal(document.querySelector('[data-study]'), null, 'Highlighting keeps the search page open');
+    const preloadGroup = JSON.parse(calls[0].options.body).preloadGroup;
+    assert.ok(preloadGroup);
+    assert.deepEqual(JSON.parse(calls[0].options.body), { ticker: 'TEST', cik: 123, preloadGroup, priority: 0 });
+    const preparedPage = document.querySelector('[data-study]');
+    assert.ok(preparedPage.closest('[hidden]'), 'Prepared page stays hidden while search is open');
+    const preparedId = preparedPage.dataset.study;
+    assert.equal(calls.filter(call => call.url === '/api/studies/preload/clear').length, 0, 'Preparation must not discard preloads or start completion');
     calls.length = 0;
     await click('Create study');
-    assert.equal(calls.length, 1);
+    assert.equal(calls.filter(call => call.url === '/api/studies?stage=fundamentals').length, 1);
+    assert.equal(document.querySelector('[data-study]'), preparedPage, 'Selection reveals the mounted page without rebuilding it');
+    assert.equal(firstId, preparedId);
+    assert.equal(preparedPage.closest('[hidden]'), null);
+    const cleanup = calls.filter(call => call.url === '/api/studies/preload/clear');
+    assert.equal(cleanup.length, 1, 'Opening Fundamentals immediately clears the unselected preloads');
+    assert.deepEqual(JSON.parse(cleanup[0].options.body), { ticker: 'TEST', cik: 123, preloadGroup });
+    assert.equal(JSON.parse(calls.find(call => call.url === '/api/studies?stage=fundamentals').options.body).preloadGroup, preloadGroup);
     assert.equal(window.studyCodeLoaded, true, 'Study/chart code downloads before the financial response arrives');
     assert.equal(completions.length, 0);
     assert.equal(document.querySelector('h1').textContent, 'Test company');

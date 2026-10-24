@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
 import type { AnnualRow, MarketQuote, Metric, Study } from './types';
@@ -187,7 +187,7 @@ function YearTick({ x = 0, y = 0, payload, excludedYears, onToggle }: { x?: numb
   </g>;
 }
 
-function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYears, excludedValues, onResetExclusions, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; excludedYears: number[]; excludedValues: string[]; onToggleYear: (year: number) => void; onRestoreYears: () => void; onResetExclusions: () => void }) {
+const OverlayChart = memo(function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYears, excludedValues, onResetExclusions, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; excludedYears: number[]; excludedValues: string[]; onToggleYear: (year: number) => void; onRestoreYears: () => void; onResetExclusions: () => void }) {
   const [offsets, setOffsets] = useState<Partial<Record<ChartKey, number>>>({});
   const [hidden, setHidden] = useState<ChartLineId[]>([]);
   const yearOffset = reportingYearOffset(annual);
@@ -304,7 +304,7 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
     <aside className="company-description-panel" aria-labelledby="company-description-title"><div className="company-description-content"><h2 id="company-description-title">About {study.company.ticker}</h2>{study.overview?.Description?.trim() ? study.overview.Description.trim().split(/\n+/).filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>) : !pending && <p>Company description is unavailable in this study.</p>}</div></aside>
     </div>
   </section>;
-}
+});
 
 type FinancialForecasts = { sales: string; eps: string };
 const pendingAnnualRows: AnnualRow[] = Array.from({ length: 10 }, (_, index) => ({
@@ -378,7 +378,7 @@ function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (num
   </svg>;
 }
 
-function ManagementTable({ annual, pending = false }: { annual: AnnualRow[]; pending?: boolean }) {
+const ManagementTable = memo(function ManagementTable({ annual, pending = false }: { annual: AnnualRow[]; pending?: boolean }) {
   const [excludedYears, setExcludedYears] = useState<number[]>([]);
   const [excludedValues, setExcludedValues] = useState<string[]>([]);
   const controls: TableExclusions = {
@@ -415,7 +415,7 @@ function ManagementTable({ annual, pending = false }: { annual: AnnualRow[]; pen
       })}</tbody>
     </table>{!rows.length && <p className="table-empty">Annual financials could not be loaded for this company.</p>}</div>
   </section>;
-}
+});
 
 function useMarketQuote(ticker: string) {
   const [quote, setQuote] = useState<MarketQuote | null>(null);
@@ -448,7 +448,7 @@ function useMarketQuote(ticker: string) {
   return { quote, quoteStatus };
 }
 
-function CompanyHeader({ study, quote, quoteStatus, pending = false }: { study: Study; quote: MarketQuote | null; quoteStatus: 'loading' | 'ok' | 'error'; pending?: boolean }) {
+const CompanyHeader = memo(function CompanyHeader({ study, quote, quoteStatus, pending = false }: { study: Study; quote: MarketQuote | null; quoteStatus: 'loading' | 'ok' | 'error'; pending?: boolean }) {
   const overview = study.overview ?? {};
   const latest = study.prices.at(-1), previous = study.prices.at(-2);
   const live = quote && (!study.priceCurrency || quote.currency === study.priceCurrency) ? quote : null;
@@ -485,7 +485,10 @@ function CompanyHeader({ study, quote, quoteStatus, pending = false }: { study: 
       ['Average Volume (3M)', compact(overview.AverageVolume)],
     ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
   </header>;
-}
+});
+
+const emptyYears: number[] = [];
+const emptyValues: string[] = [];
 
 export default function StudyPage({ study, onBack, onRefresh, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails, fundamentalsStatus = 'idle', fundamentalsError, onRetryFundamentals }: {
   study: Study; onBack: () => void; onRefresh: () => void;
@@ -501,29 +504,31 @@ export default function StudyPage({ study, onBack, onRefresh, onFundamentalsRead
   const updateForecast = (key: keyof FinancialForecasts, value: string) => setForecastsByStudy(current => ({ ...current, [study.id]: { ...(current[study.id] ?? { sales: '', eps: '' }), [key]: value } }));
   const { quote, quoteStatus } = useMarketQuote(study.company.ticker);
   const [yearExclusions, setYearExclusions] = useState<Record<string, number[]>>({});
-  const excludedYears = yearExclusions[study.id] ?? [];
+  const excludedYears = yearExclusions[study.id] ?? emptyYears;
   const [valueExclusions, setValueExclusions] = useState<Record<string, string[]>>({});
-  const excludedValues = valueExclusions[study.id] ?? [];
-  const toggleValue = (metric: string, year: number) => setValueExclusions(current => {
+  const excludedValues = valueExclusions[study.id] ?? emptyValues;
+  const toggleValue = useCallback((metric: string, year: number) => setValueExclusions(current => {
     const values = current[study.id] ?? [], id = valueId(metric, year);
     return { ...current, [study.id]: values.includes(id) ? values.filter(value => value !== id) : [...values, id] };
-  });
-  const resetExclusions = () => { restoreYears(); setValueExclusions(current => ({ ...current, [study.id]: [] })); };
-  const restoreYears = () => setYearExclusions(current => ({ ...current, [study.id]: [] }));
-  const toggleYear = (year: number) => setYearExclusions(current => {
+  }), [study.id]);
+  const restoreYears = useCallback(() => setYearExclusions(current => ({ ...current, [study.id]: [] })), [study.id]);
+  const resetExclusions = useCallback(() => { restoreYears(); setValueExclusions(current => ({ ...current, [study.id]: [] })); }, [study.id, restoreYears]);
+  const toggleYear = useCallback((year: number) => setYearExclusions(current => {
     const years = current[study.id] ?? [];
     return { ...current, [study.id]: years.includes(year) ? years.filter(item => item !== year) : [...years, year] };
-  });
+  }), [study.id]);
   const controls: TableExclusions = { excludedYears, excludedValues, onToggleYear: toggleYear, onToggleValue: toggleValue, onResetExclusions: resetExclusions };
   useEffect(() => {
     document.title = `${study.company.ticker} · Stock Study`;
     return () => { document.title = 'Stock Search'; };
   }, [study.company.ticker]);
   const normalized = study.epsAdjustment?.status === 'normalized';
-  const annual = study.annual.filter(row => reportingYear(row, reportingYearOffset(study.annual)) >= FIRST_HISTORY_YEAR).map(row => ({
-    ...row,
-    eps: normalized && row.epsSplitFactor != null && Number.isFinite(row.epsSplitFactor) && row.epsSplitFactor > 0 ? row.eps : null,
-  }));
+  const annual = useMemo(() => {
+    const offset = reportingYearOffset(study.annual);
+    return study.annual.filter(row => reportingYear(row, offset) >= FIRST_HISTORY_YEAR).map(row => ({
+      ...row, eps: normalized && row.epsSplitFactor != null && Number.isFinite(row.epsSplitFactor) && row.epsSplitFactor > 0 ? row.eps : null,
+    }));
+  }, [study.annual, normalized]);
   const latestEPS = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).filter(row => row.eps !== null && !isValueExcluded(controls, 'eps', reportingYear(row, reportingYearOffset(annual)))).at(-1)?.eps ?? null;
   const highEPSForecast = fiveYearEstimate(latestEPS, forecasts.eps);
   const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);

@@ -1,6 +1,6 @@
 """Fetch a bounded Yahoo-industry peer sample; never label it an industry universe."""
 from concurrent.futures import ThreadPoolExecutor
-import json
+from server.company_directory import indexes
 
 from server.schema_fields import ANNUAL_FIELDS, AVERAGE_FIELDS
 from server.study_schema import finite, growth_rate
@@ -39,8 +39,7 @@ def add_peers(document, symbols):
         document['Metadata']['PeerGroup'] = {'Method': 'Yahoo industry top-company sample', 'Members': [], 'NotIndustryAverage': True}
         return
     from server.studies import ROOT, create_study
-    directory = json.loads((ROOT / 'public' / 'companies.json').read_text())['data']
-    lookup = {symbol.replace('.', '-'): {'cik': cik, 'ticker': symbol, 'name': name, 'exchange': exchange} for cik, name, symbol, exchange in directory}
+    lookup = indexes()[1]
     seen = {int(document['Company']['CentralIndexKey'])}
     companies, skipped = [], []
     for symbol in symbols:

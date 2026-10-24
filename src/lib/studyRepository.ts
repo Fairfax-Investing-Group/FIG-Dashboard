@@ -1,17 +1,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { getSupabaseClient } from './supabase';
 import type { Database } from './database.types';
 import { validateStudyValues, type NewSavedStudy } from './studyInputs';
 
 // Infrastructure only: no component calls these methods or autosaves yet.
-export function createStudyRepository(client: SupabaseClient<Database> | null = supabase) {
+export function createStudyRepository(client?: SupabaseClient<Database> | null) {
   async function authenticated() {
-    if (!client) throw new Error('Study storage is not configured.');
-    const { data, error } = await client.auth.getSession();
+    const db = client === undefined ? await getSupabaseClient() : client;
+    if (!db) throw new Error('Study storage is not configured.');
+    const { data, error } = await db.auth.getSession();
     if (error) throw error;
     if (!data.session?.user) throw new Error('Log in to access saved studies.');
     // This is a local convenience check; Postgres RLS validates real ownership.
-    return { db: client, userId: data.session.user.id };
+    return { db, userId: data.session.user.id };
   }
   return {
     async list() {

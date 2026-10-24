@@ -9,6 +9,7 @@ export async function readStudyStream(response: Response, onProgress: (document:
   const decoder = new TextDecoder();
   let buffer = '';
   let ready: StudyDocument | null = null;
+  let ended = false;
   const consume = (line: string) => {
     if (!line.trim()) return;
     const event = JSON.parse(line);
@@ -26,10 +27,13 @@ export async function readStudyStream(response: Response, onProgress: (document:
         consume(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
       }
-      if (done) break;
+      if (done) { ended = true; break; }
     }
     consume(buffer);
     if (!ready) throw new Error('The study connection was interrupted. Please retry.');
     return ready;
-  } finally { reader.releaseLock(); }
+  } finally {
+    if (!ended) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }

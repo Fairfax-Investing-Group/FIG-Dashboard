@@ -6,18 +6,19 @@ const PortfolioDashboard = lazy(() => import('./PortfolioDashboard'));
 export type Company = { cik: number; name: string; ticker: string; exchange: string | null };
 type Directory = { fields: string[]; data: [number, string, string, string | null][] };
 
-export default function SearchPage({ onSelect, onPreload }: { onSelect: (company: Company) => void; onPreload?: (company: Company) => void }) {
+export default function SearchPage({ onSelect, onPreload, onPreparePage }: { onSelect: (company: Company) => void; onPreload?: (company: Company, priority?: number) => void | boolean | Promise<void | boolean>; onPreparePage?: (company: Company | null) => void }) {
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeMatch, setActiveMatch] = useState(-1);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
-  const preloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preloadTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const preloaded = useRef(new Map<string, number>());
+  const preloading = useRef(new Map<string, Promise<boolean>>());
   const cancelPreload = () => {
-    if (preloadTimer.current !== null) clearTimeout(preloadTimer.current);
-    preloadTimer.current = null;
+    preloadTimers.current.forEach(clearTimeout);
+    preloadTimers.current = [];
   };
 
   useEffect(() => {
@@ -53,18 +54,41 @@ export default function SearchPage({ onSelect, onPreload }: { onSelect: (company
       .sort((a, b) => rank(a) - rank(b) || a.ticker.localeCompare(b.ticker)).slice(0, 10);
   }, [companies, search]);
 
+  const closest = matches[0];
+  useEffect(() => {
+    if (!searchOpen || !search || !closest) { onPreparePage?.(null); return; }
+    const timer = setTimeout(() => onPreparePage?.(closest), 25);
+    return () => clearTimeout(timer);
+  }, [query, closest, searchOpen, onPreparePage]);
+
   useEffect(() => {
     if (!searchOpen || !search || !onPreload || !matches.length) return;
-    preloadTimer.current = setTimeout(() => {
-      preloadTimer.current = null;
-      for (const company of matches.slice(0, 5)) {
-        const key = `${company.cik}:${company.ticker}`;
-        if (Date.now() - (preloaded.current.get(key) ?? 0) < 60_000) continue;
-        preloaded.current.set(key, Date.now());
-        onPreload(company);
+    let cancelled = false;
+    const preload = (company: Company, priority: number, attempt = 0) => {
+      const key = `${company.cik}:${company.ticker}`;
+      if (Date.now() - (preloaded.current.get(key) ?? 0) < 60_000) return;
+      let request = preloading.current.get(key);
+      if (!request) {
+        request = Promise.resolve().then(() => onPreload(company, priority)).then(result => result !== false, () => false);
+        preloading.current.set(key, request);
+        request.then(accepted => {
+          preloading.current.delete(key);
+          if (accepted) {
+            preloaded.current.delete(key);
+            preloaded.current.set(key, Date.now());
+            while (preloaded.current.size > 8) preloaded.current.delete(preloaded.current.keys().next().value!);
+          }
+        });
       }
-    }, 50);
-    return cancelPreload;
+      request.then(accepted => {
+        if (!accepted && !cancelled && attempt < (priority === 0 ? 10 : 3)) {
+          preloadTimers.current.push(setTimeout(() => preload(company, priority, attempt + 1), 200));
+        }
+      });
+    };
+    preload(matches[0], 0);
+    preloadTimers.current = [setTimeout(() => matches.slice(1, 5).forEach((company, index) => preload(company, index + 1)), 500)];
+    return () => { cancelled = true; cancelPreload(); };
   }, [query, matches, searchOpen, onPreload]);
 
   return (
