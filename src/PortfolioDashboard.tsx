@@ -73,10 +73,20 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
       controller?.abort();
       controller = new AbortController();
       try {
-        const response = await fetch('/api/portfolio', { signal: controller.signal });
-        if (!response.ok) throw new Error('Portfolio unavailable');
-        const data = await response.json() as Portfolio;
-        if (!Array.isArray(data.holdings) || !Array.isArray(data.performance) || typeof data.summary?.portfolioValue !== 'number') throw new Error('Invalid portfolio');
+        let data: Portfolio | null = null;
+        for (const source of ['/api/portfolio', '/portfolio-current.json']) {
+          try {
+            const response = await fetch(source, { signal: controller.signal });
+            if (!response.ok) continue;
+            const candidate = await response.json() as Portfolio;
+            if (!Array.isArray(candidate.holdings) || !Array.isArray(candidate.performance) || typeof candidate.summary?.portfolioValue !== 'number') continue;
+            data = candidate;
+            break;
+          } catch (sourceError) {
+            if (sourceError instanceof DOMException && sourceError.name === 'AbortError') throw sourceError;
+          }
+        }
+        if (!data) throw new Error('Portfolio unavailable');
         if (active) { setPortfolio(data); setUpdateUnavailable(false); }
       } catch (error) {
         if (active && !(error instanceof DOMException && error.name === 'AbortError')) setUpdateUnavailable(true);
