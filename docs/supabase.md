@@ -28,8 +28,10 @@ Run the entire contents of
 [`202610240001_user_studies.sql`](../supabase/migrations/202610240001_user_studies.sql)
 in the project's Supabase SQL Editor once. Then run
 [`202610240002_study_made_at.sql`](../supabase/migrations/202610240002_study_made_at.sql)
-to add the immutable original study date. If the first migration is already
-applied, run only the second migration. If using the Supabase CLI with a linked
+to add the immutable original study date. Then run
+[`202610240003_public_study_reads.sql`](../supabase/migrations/202610240003_public_study_reads.sql)
+to allow public reads while retaining owner-only writes. Run migrations in order;
+skip ones already applied. If using the Supabase CLI with a linked
 project, `supabase db push` applies the same versioned migration.
 
 The browser publishable key cannot create database tables or apply migrations.
@@ -77,8 +79,9 @@ research API. They are separate from Supabase and are not uploaded or migrated.
 
 `src/lib/studyRepository.ts` exposes `createStudyRepository()` with `list()`,
 `get(id)`, `create(values)`, `update(id, patch)`, and `remove(id)` methods. Each
-method requires a signed-in session. Postgres row-level security independently
-enforces ownership for reads, inserts, updates and deletes. Account deletion
+write method requires a signed-in session. Listing and opening studies are public.
+Postgres row-level security allows public SELECTs, while inserts, updates and
+deletes require ownership. Anonymous users have SELECT permission only. Account deletion
 cascades to that user's input records.
 
 ```ts
@@ -99,8 +102,12 @@ identity while replacing provider data. A logged-out user can sign in beside the
 without leaving the study. Invalid input or failed writes leave the draft intact
 and display an error. There is no autosave; preloads never create Supabase rows.
 
-The homepage's **Saved studies** list is private to the signed-in user. Opening
-a record restores all stored inputs into a fresh local company snapshot. Null
+The homepage's **Saved studies** table is public, including for logged-out
+visitors. All saved input fields, including notes, can be read. Opening
+a record restores all stored inputs into a fresh local company snapshot.
+Nonowners get a read-only view: forecasts, assumptions, and exclusions cannot be
+changed, and save controls are hidden. Owners can edit and save normally. The
+creator ID is visible publicly; other users’ account emails are not queried. Null
 overrides continue using fresh calculated defaults, and linked P/E periods are
 recalculated from fresh history. The saved original date stays unchanged.
 Saving a new search result creates a separate saved record, even for the same
@@ -114,8 +121,8 @@ npm run build
 ```
 
 The migration test runs actual Postgres using PGlite with local stand-ins for
-Supabase's auth roles and `auth.uid()`. It verifies ownership isolation, denied
-anonymous access, protected ownership/timestamps, numeric validation, and account
+Supabase's auth roles and `auth.uid()`. It verifies public reads for anonymous and authenticated visitors, owner-only
+writes, protected ownership/timestamps, numeric validation, and account
 cascade deletion. It does not apply the migration to a hosted project or log in a
 real account.
 

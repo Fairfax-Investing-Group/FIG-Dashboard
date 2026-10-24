@@ -977,3 +977,5 @@ body {
   .home-login-form .home-login-actions { min-height:0; white-space:normal; }
   .home-login-form .home-login-actions button { padding:4px 8px; font-size:9px; }
 }
+.study-assumptions { border:0; padding:0; margin:0; min-width:0; }
+.study-page input:disabled { opacity:1; color:inherit; cursor:default; }

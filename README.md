@@ -31,10 +31,12 @@ session restoration, and logout. Set `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local` (see `.env.example`). Apply
 `supabase/migrations/202610240001_user_studies.sql` in your project's SQL Editor.
 
-Run `supabase/migrations/202610240002_study_made_at.sql` after the first migration.
+Apply the remaining migrations in order: `202610240002_study_made_at.sql` and
+`202610240003_public_study_reads.sql`.
 Use **Save study** on a company page to store your forecasts, valuation overrides,
 and excluded data points. Repeated saves update the same record. Saved studies
-appear on Company search after login; opening one restores its inputs and fetches
+appear publicly on Company search, including for logged-out visitors. Only the
+creator can edit or save changes. Opening a study restores its inputs and fetches
 fresh provider data. The original study date, first-save date, and latest-save
 date are stored separately.
 

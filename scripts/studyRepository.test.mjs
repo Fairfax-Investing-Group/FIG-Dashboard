@@ -39,9 +39,14 @@ test('cloud repository sends only explicit inputs through the authenticated Supa
     ]) await assert.rejects(repository.create(invalid), /study input/);
     assert.equal(calls.length, 2, 'Invalid inputs must never reach Supabase');
     client.auth.getSession = async () => ({ data: { session: null }, error: null });
-    await assert.rejects(repository.list(), /Log in/);
+    await repository.list();
+    assert.ok(!calls[2].url.includes('user_id='), 'Public lists must not filter to the current owner');
+    await repository.get('saved-id');
+    assert.ok(!calls[3].url.includes('user_id='), 'Public reads must not filter to the current owner');
     await assert.rejects(repository.create(input), /Log in/);
-    assert.equal(calls.length, 2);
+    await assert.rejects(repository.update('saved-id', { notes: 'Anonymous edit' }), /Log in/);
+    await assert.rejects(repository.remove('saved-id'), /Log in/);
+    assert.equal(calls.length, 4);
     await assert.rejects(createStudyRepository(null).list(), /not configured/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

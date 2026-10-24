@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { Study } from './types';
 import { currentValuation, valuationAverage, type ValuationRow } from './valuationMath';
 import { draftFromValues, draftToValues, defaults, type Draft } from './lib/valuationInputs';
-import { useStudyInputs, useStudyInputSection } from './StudyInputsContext';
+import { useStudyInputs, useStudyInputSection, useStudyReadOnly } from './StudyInputsContext';
 import { assumption, riskReward, type LowPriceMethod, type ZoneSplit } from './riskRewardMath';
 
 const number = (value: number | null, digits = 2) => value === null ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
@@ -26,6 +26,7 @@ export default function RiskReward({ study, current, history, highEPSForecast, e
   highEPSForecast: number | null; epsForecastRate: string; onEditEPSForecast: () => void;
 }) {
   const inputs = useStudyInputs();
+  const readOnly = useStudyReadOnly();
   const [draft, setDraft] = useState<Draft>(() => draftFromValues(inputs?.initial));
   useStudyInputSection('valuation', draftToValues(draft));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(previous => ({ ...previous, [key]: value }));
@@ -62,7 +63,7 @@ export default function RiskReward({ study, current, history, highEPSForecast, e
     { key: 'average', label: 'Average low price, last 5 years' }, { key: 'dividend', label: 'Dividend-supported price' }, { key: 'manual', label: 'Manual low-price forecast' },
   ];
   const rangePosition = model.validRange && current.price !== null ? Math.max(0, Math.min(100, (current.price - model.lowPrice!) / model.range! * 100)) : null;
-  return <>
+  return <fieldset disabled={readOnly} className="study-assumptions" aria-label="Valuation assumptions">
     <section className="forecast-section" aria-labelledby="risk-reward-title"><div className="fundamentals-title"><h2 id="risk-reward-title">Risk & Reward — Next 5 Years</h2><button className="forecast-reset" onClick={() => setDraft({ ...defaults })}>Reset assumptions</button></div>
       <div className="forecast-section-body forecast-layout"><div className="forecast-workings">
         <div className="forecast-input-grid"><fieldset className="forecast-card"><legend>High-price forecast</legend>
@@ -97,5 +98,5 @@ export default function RiskReward({ study, current, history, highEPSForecast, e
       <div className="financial-table-scroll"><table className="forecast-return-table"><thead><tr><th scope="col">5-year scenario</th><th scope="col">{draft.highMethod === 'manual' ? 'My high price' : 'High P/E'}</th><th scope="col">Average P/E</th></tr></thead><tbody><tr><th scope="row">Forecast P/E</th><td>{number(model.forecastHighPE, 1)}</td><td>{number(model.averagePE, 1)}</td></tr><tr><th scope="row">Forecast price</th><td>{money(model.highPrice)}</td><td>{money(model.averagePrice)}</td></tr><tr><th scope="row">Annualized price appreciation</th><td>{percent(model.highReturns.priceCAGR)}</td><td>{percent(model.averageReturns.priceCAGR)}</td></tr><tr><th scope="row">Estimated average yield</th><td>{percent(model.highReturns.averageYield)}</td><td>{percent(model.averageReturns.averageYield)}</td></tr><tr className="forecast-return-total"><th scope="row">Estimated annual return</th><td>{percent(model.highReturns.annualReturn)}</td><td>{percent(model.averageReturns.annualReturn)}</td></tr></tbody></table></div>
       <p className="forecast-help">Annual return estimate = price CAGR + payout-based yield; dividend reinvestment is not modeled.</p>
     </div><Summary title="Potential at a glance"><SummaryRow label="Zone" value={<span className="forecast-zone" data-zone={model.zone}>{model.zone}</span>}/><SummaryRow label="Upside / downside" value={model.upsideDownside === null ? '—' : `${number(model.upsideDownside)} : 1`}/><SummaryRow label={draft.highMethod === 'manual' ? 'Annual return, my high price' : 'Annual return, high P/E'} value={percent(model.highReturns.annualReturn)}/><SummaryRow label="Annual return, average P/E" value={percent(model.averageReturns.annualReturn)}/><SummaryRow label="Buy price meeting both targets" value={money(model.buyPrice)}/><SummaryRow label="Buy-zone ceiling" value={money(model.buyUpper)}/><SummaryRow label="Current price" value={money(current.price)}/></Summary></div></section>
-  </>;
+  </fieldset>;
 }

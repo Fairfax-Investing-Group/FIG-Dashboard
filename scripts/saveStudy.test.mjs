@@ -93,6 +93,25 @@ test('save and reopen preserve explicit forecasts, exclusions, zero overrides, d
     assert.match(document.querySelector('[role="alert"]').textContent, /Could not save.*Connection interrupted/);
     assert.equal(document.querySelector('[aria-label="Manual high-price forecast"]').value, '150', 'Failed saves keep the draft');
     globalThis.studyRepository.update = update;
+    // The same saved record is readable, but not editable, by another account.
+    globalThis.studyAuth = { session: { user: { id: 'bob', email: 'bob@example.com' } }, loading: false };
+    await render({ key: 'public-view', initialSavedStudy: saved });
+    assert.match(document.querySelector('.study-save').textContent, /Read-only/);
+    assert.ok(![...document.querySelectorAll('button')].some(button => /Save changes|Save study/.test(button.textContent)));
+    const publicForecast = document.querySelector('[aria-label="Sales annual forecast percentage"]');
+    assert.equal(publicForecast.disabled, true);
+    await edit(publicForecast, '99');
+    assert.equal(publicForecast.value, '12.5', 'Nonowners cannot change the forecast state');
+    assert.ok([...document.querySelectorAll('.table-year-toggle')].every(button => button.disabled));
+    await click('Valuation');
+    assert.equal(document.querySelector('.study-assumptions').disabled, true);
+    globalThis.studyAuth = { session: null, loading: false };
+    await render({ key: 'public-anonymous', initialSavedStudy: saved });
+    assert.match(document.querySelector('.study-save').textContent, /Read-only/);
+    await React.act(async () => root.render(React.createElement(SavedStudies, { onOpen(value) { assert.equal(value.id, 'cloud-id'); } })));
+    assert.match(document.querySelector('.saved-studies tbody').textContent, /AAPL/);
+    await click('Open study');
+    assert.equal(writes.length, 3, 'Public viewing must not create or modify studies');
     globalThis.studyAuth = { session: null, loading: false };
     await render({ key: 'logged-out' });
     assert.ok([...document.querySelectorAll('button')].find(button => button.textContent === 'Log in to save'));

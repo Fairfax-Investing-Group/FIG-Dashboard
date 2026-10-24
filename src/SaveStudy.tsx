@@ -16,9 +16,10 @@ export default function SaveStudy({ study }: { study: Study }) {
   const lock = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const readOnly = Boolean(saved && saved.user_id !== auth.session?.user.id);
   const own = saved?.user_id === auth.session?.user.id ? saved : undefined;
   async function save() {
-    if (lock.current || !auth.session || !inputs) return;
+    if (lock.current || !auth.session || !inputs || readOnly) return;
     lock.current = true; setBusy(true); setError(null);
     try {
       const values = { ...inputs.collect(), ticker: study.company.ticker, cik: study.company.cik };
@@ -34,9 +35,10 @@ export default function SaveStudy({ study }: { study: Study }) {
     } finally { lock.current = false; setBusy(false); }
   }
   return <section className="study-save" aria-label="Save study">
-    <button type="button" className="export-button" onClick={() => auth.session ? void save() : setShowLogin(value => !value)} disabled={busy || auth.loading || !study.company.cik}>{busy ? 'Saving…' : !auth.session ? 'Log in to save' : own ? 'Save changes' : 'Save study'}</button>
-    {!auth.session && showLogin && <div className="study-save-login"><LoginForm compact/></div>}
-    <span role="status">{own && <>By {auth.session?.user.email || own.user_id} · Made {date(own.study_made_at ?? own.created_at)} · Saved {date(own.updated_at)}</>}</span>
+    {!readOnly && <button type="button" className="export-button" onClick={() => auth.session ? void save() : setShowLogin(value => !value)} disabled={busy || auth.loading || !study.company.cik}>{busy ? 'Saving…' : !auth.session ? 'Log in to save' : own ? 'Save changes' : 'Save study'}</button>}
+    {readOnly && <span>Read-only · Only the creator can edit this study.</span>}
+    {!auth.session && !readOnly && showLogin && <div className="study-save-login"><LoginForm compact/></div>}
+    <span role="status">{saved && <>By {own ? auth.session?.user.email || saved.user_id : saved.user_id} · Made {date(saved.study_made_at ?? saved.created_at)} · Saved {date(saved.updated_at)}</>}</span>
     {error && <span role="alert" className="auth-error">{error}</span>}
   </section>;
 }

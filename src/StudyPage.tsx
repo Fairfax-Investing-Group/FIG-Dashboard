@@ -10,7 +10,7 @@ import ValuationPage from './ValuationPage';
 import NewsPage from './NewsPage';
 import { ExclusionYear, ExclusionValue, ExclusionHelp, isValueExcluded, metricExcludedYears, valueId, type TableExclusions } from './ExclusionControls';
 
-import { StudyInputsProvider, useStudyInputs, useStudyInputSection, inputNumber } from './StudyInputsContext';
+import { StudyInputsProvider, useStudyInputs, useStudyInputSection, useStudyReadOnly, inputNumber } from './StudyInputsContext';
 import type { SavedStudy } from './lib/studyInputs';
 import SaveStudy from './SaveStudy';
 
@@ -183,10 +183,11 @@ function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: C
 }
 
 function YearTick({ x = 0, y = 0, payload, excludedYears, onToggle }: { x?: number; y?: number; payload?: { value: number }; excludedYears: number[]; onToggle: (year: number) => void }) {
+  const readOnly = useStudyReadOnly();
   if (!payload) return null;
   const year = new Date(Number(payload.value)).getUTCFullYear();
   const excluded = excludedYears.includes(year);
-  return <g transform={`translate(${x},${y})`} className={`year-tick${excluded ? ' is-excluded' : ''}`} role="button" tabIndex={0} aria-label={`${excluded ? 'Include' : 'Exclude'} ${year} in growth calculations`} aria-pressed={!excluded} onClick={() => onToggle(year)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle(year); } }}>
+  return <g transform={`translate(${x},${y})`} className={`year-tick${excluded ? ' is-excluded' : ''}`} role="button" tabIndex={readOnly ? -1 : 0} aria-disabled={readOnly} aria-label={`${excluded ? 'Include' : 'Exclude'} ${year} in growth calculations`} aria-pressed={!excluded} onClick={() => { if (!readOnly) onToggle(year); }} onKeyDown={event => { if (!readOnly && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onToggle(year); } }}>
     <title>{`${excluded ? 'Include' : 'Exclude'} ${year} in growth calculations`}</title><rect x={-16} y={-4} width={32} height={22} rx={5} fill="transparent"/><text y={6} textAnchor="middle" fontSize={10} fontWeight={500} fill={excluded ? '#a5adb6' : '#7c8793'} textDecoration={excluded ? 'line-through' : undefined}>{String(year).slice(-2)}</text>
   </g>;
 }
@@ -355,7 +356,7 @@ function FinancialTable({ annual, study, controls, forecasts, onForecastChange, 
             return <td key={row.periodEnd} className={excluded ? 'excluded-year-value' : undefined} title={excluded ? 'Excluded from growth calculations' : undefined}><ExclusionValue metric={metric.key} year={reportingYear(row, yearOffset)} name={metric.title} available={row[metric.key] != null} controls={controls}>{value}</ExclusionValue></td>;
           })}
           <td className="calculated-column" title={first && included.at(-1) ? `Log-linear regression across included fiscal years: ${displayDate(first.periodEnd)} to ${displayDate(included.at(-1)!.periodEnd)}` : undefined}>{growth === null ? '—' : `${growth.toFixed(1)}%`}</td>
-          <td className="forecast-cell">{forecastKey ? <input type="number" step="0.1" min="-100" value={forecasts[forecastKey]} placeholder="—" aria-label={`${metric.title} annual forecast percentage`} onChange={event => onForecastChange(forecastKey, event.target.value)}/> : '—'}</td>
+          <td className="forecast-cell">{forecastKey ? <input type="number" step="0.1" min="-100" disabled={controls.readOnly} value={forecasts[forecastKey]} placeholder="—" aria-label={`${metric.title} annual forecast percentage`} onChange={event => onForecastChange(forecastKey, event.target.value)}/> : '—'}</td>
           <td className="estimate-cell">{money(estimate === null ? null : estimate / scale, null, perShare)}</td>
         </tr>;
       })}</tbody>
@@ -383,12 +384,13 @@ function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (num
 }
 
 const ManagementTable = memo(function ManagementTable({ annual, pending = false }: { annual: AnnualRow[]; pending?: boolean }) {
+  const readOnly = useStudyReadOnly();
   const inputs = useStudyInputs();
   const [excludedYears, setExcludedYears] = useState<number[]>(() => inputs?.initial?.management_excluded_years ?? []);
   const [excludedValues, setExcludedValues] = useState<string[]>(() => inputs?.initial?.management_excluded_values ?? []);
   useStudyInputSection('management', { management_excluded_years: excludedYears, management_excluded_values: excludedValues });
   const controls: TableExclusions = {
-    scope: 'management', excludedYears, excludedValues,
+    scope: 'management', readOnly, excludedYears, excludedValues,
     onToggleYear: year => setExcludedYears(current => current.includes(year) ? current.filter(value => value !== year) : [...current, year]),
     onToggleValue: (metric, year) => {
       const id = valueId(metric, year);
@@ -506,6 +508,7 @@ export default function StudyPage(props: StudyPageProps) {
 }
 function StudyPageContent({ study, onBack, onRefresh, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails, fundamentalsStatus = 'idle', fundamentalsError, onRetryFundamentals, active = true }: StudyPageProps) {
   useEffect(() => { onFundamentalsReady?.(study.id); }, [study.id, onFundamentalsReady]);
+  const readOnly = useStudyReadOnly();
   const pending = fundamentalsStatus !== 'idle';
   const tabs = [{ key: 'fundamentals', label: 'Analyzing Fundamentals' }, { key: 'valuation', label: 'Valuation' }, { key: 'news', label: 'Recent News' }] as const;
   const [tab, setTab] = useState<(typeof tabs)[number]['key']>('fundamentals');
@@ -519,24 +522,24 @@ function StudyPageContent({ study, onBack, onRefresh, onFundamentalsReady, detai
     eps: inputs?.initial?.eps_growth_percent == null ? '' : String(inputs.initial.eps_growth_percent),
   } }));
   const forecasts = forecastsByStudy[study.id] ?? { sales: '', eps: '' };
-  const updateForecast = (key: keyof FinancialForecasts, value: string) => setForecastsByStudy(current => ({ ...current, [study.id]: { ...(current[study.id] ?? { sales: '', eps: '' }), [key]: value } }));
+  const updateForecast = (key: keyof FinancialForecasts, value: string) => !readOnly && setForecastsByStudy(current => ({ ...current, [study.id]: { ...(current[study.id] ?? { sales: '', eps: '' }), [key]: value } }));
   const { quote, quoteStatus } = useMarketQuote(study.company.ticker);
   const [yearExclusions, setYearExclusions] = useState<Record<string, number[]>>(() => ({ [study.id]: inputs?.initial?.excluded_years ?? [] }));
   const excludedYears = yearExclusions[study.id] ?? emptyYears;
   const [valueExclusions, setValueExclusions] = useState<Record<string, string[]>>(() => ({ [study.id]: inputs?.initial?.excluded_values ?? [] }));
   const excludedValues = valueExclusions[study.id] ?? emptyValues;
   useStudyInputSection('fundamentals', { sales_growth_percent: inputNumber(forecasts.sales), eps_growth_percent: inputNumber(forecasts.eps), excluded_years: excludedYears, excluded_values: excludedValues });
-  const toggleValue = useCallback((metric: string, year: number) => setValueExclusions(current => {
+  const toggleValue = useCallback((metric: string, year: number) => !readOnly && setValueExclusions(current => {
     const values = current[study.id] ?? [], id = valueId(metric, year);
     return { ...current, [study.id]: values.includes(id) ? values.filter(value => value !== id) : [...values, id] };
-  }), [study.id]);
-  const restoreYears = useCallback(() => setYearExclusions(current => ({ ...current, [study.id]: [] })), [study.id]);
-  const resetExclusions = useCallback(() => { restoreYears(); setValueExclusions(current => ({ ...current, [study.id]: [] })); }, [study.id, restoreYears]);
-  const toggleYear = useCallback((year: number) => setYearExclusions(current => {
+  }), [study.id, readOnly]);
+  const restoreYears = useCallback(() => !readOnly && setYearExclusions(current => ({ ...current, [study.id]: [] })), [study.id, readOnly]);
+  const resetExclusions = useCallback(() => { if (readOnly) return; restoreYears(); setValueExclusions(current => ({ ...current, [study.id]: [] })); }, [study.id, restoreYears, readOnly]);
+  const toggleYear = useCallback((year: number) => !readOnly && setYearExclusions(current => {
     const years = current[study.id] ?? [];
     return { ...current, [study.id]: years.includes(year) ? years.filter(item => item !== year) : [...years, year] };
-  }), [study.id]);
-  const controls: TableExclusions = { excludedYears, excludedValues, onToggleYear: toggleYear, onToggleValue: toggleValue, onResetExclusions: resetExclusions };
+  }), [study.id, readOnly]);
+  const controls: TableExclusions = { readOnly, excludedYears, excludedValues, onToggleYear: toggleYear, onToggleValue: toggleValue, onResetExclusions: resetExclusions };
   useEffect(() => {
     if (!active) return;
     document.title = `${study.company.ticker} · Stock Study`;

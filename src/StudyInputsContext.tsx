@@ -1,4 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useAuth } from './auth/AuthProvider';
 import type { SavedStudy, StudyUserValues } from './lib/studyInputs';
 
 type InputsContext = {
@@ -19,6 +20,12 @@ export function StudyInputsProvider({ initial, children }: { initial?: SavedStud
 }
 
 export const useStudyInputs = () => useContext(Context);
+export function useStudyReadOnly() {
+  const inputs = useStudyInputs();
+  const { session } = useAuth();
+  const saved = inputs?.record.current;
+  return Boolean(saved && saved.user_id !== session?.user.id);
+}
 
 /** Capture only editable assumptions; provider data never enters this registry. */
 export function useStudyInputSection(name: string, values: StudyUserValues) {

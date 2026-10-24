@@ -6,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 const alice = '00000000-0000-4000-8000-000000000001';
 const bob = '00000000-0000-4000-8000-000000000002';
 
-test('Postgres study migration isolates owners and stores only explicit inputs', async () => {
+test('Postgres permits public study reads while restricting writes to the creator', async () => {
   const db = new PGlite();
   try {
     // Supabase-owned auth primitives are supplied locally for this actual Postgres check.
@@ -23,6 +23,7 @@ test('Postgres study migration isolates owners and stores only explicit inputs',
     `);
     await db.exec(await readFile(new URL('../supabase/migrations/202610240001_user_studies.sql', import.meta.url), 'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/202610240002_study_made_at.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/202610240003_public_study_reads.sql', import.meta.url), 'utf8'));
     const asUser = async id => db.exec(`reset role; set role authenticated; set request.jwt.claim.sub = '${id}';`);
     await asUser(alice);
     const { rows: [saved] } = await db.query("insert into public.studies(ticker,cik,eps_growth_percent,manual_low_price,high_pe_years,excluded_years,study_made_at) values ('AAPL',320193,12,0,5,array[2020],'2026-10-01T12:00:00Z') returning *");
@@ -46,12 +47,14 @@ test('Postgres study migration isolates owners and stores only explicit inputs',
     assert.equal(String(afterSave.study_made_at), String(saved.study_made_at));
     assert.ok(new Date(afterSave.updated_at) >= new Date(saved.updated_at));
     await asUser(bob);
-    assert.equal((await db.query(`select * from public.studies where id = '${saved.id}'`)).rows.length, 0);
+    assert.equal((await db.query(`select * from public.studies where id = '${saved.id}'`)).rows.length, 1, 'Other accounts can view the study');
     assert.equal((await db.query(`update public.studies set notes = 'Other user' where id = '${saved.id}' returning id`)).rows.length, 0);
     assert.equal((await db.query(`delete from public.studies where id = '${saved.id}' returning id`)).rows.length, 0);
     await assert.rejects(db.exec(`insert into public.studies(user_id,ticker,cik) values ('${alice}','AAPL',320193);`), /permission denied/);
     await db.exec('reset role; set role anon;');
-    await assert.rejects(db.query('select * from public.studies'), /permission denied/);
+    assert.equal((await db.query('select * from public.studies')).rows.length, 1, 'Logged-out visitors can view studies');
+    await assert.rejects(db.exec(`update public.studies set notes = 'Anonymous edit' where id = '${saved.id}'`), /permission denied/);
+    await assert.rejects(db.exec(`delete from public.studies where id = '${saved.id}'`), /permission denied/);
     await assert.rejects(db.exec("insert into public.studies(ticker,cik) values ('AAPL',320193);"), /permission denied/);
     // RLS must still deny cross-account writes even if grants are broadened later.
     await db.exec('reset role; grant insert(user_id), update(user_id) on public.studies to authenticated;');
