@@ -1,5 +1,6 @@
 import type { AnnualRow, MarketQuote, Study } from './types';
 import { trailingFinancials } from './trailingFinancials';
+import { reportingYear, reportingYearOffset } from './reportingYears';
 
 export type ValuationRow = {
   year: number; periodEnd: string | null;
@@ -14,7 +15,8 @@ const percent = (numerator: number | null, denominator: number | null) => numera
 
 export function valuationRows(annual: AnnualRow[], compatibleCurrencies: boolean, years: number): ValuationRow[] {
   if (!annual.length) return [];
-  const yearOf = (row: AnnualRow) => row.fiscalYear ?? Number(row.periodEnd.slice(0, 4));
+  const offset = reportingYearOffset(annual);
+  const yearOf = (row: AnnualRow) => reportingYear(row, offset);
   const last = Math.max(...annual.map(yearOf));
   return Array.from({ length: years }, (_, index) => {
     const year = last - years + 1 + index;

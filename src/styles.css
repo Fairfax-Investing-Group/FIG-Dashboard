@@ -446,6 +446,71 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
   .valuation-period { gap:8px; }
 }
 
+/* Editable five-year valuation assumptions and linked EPS forecasts. */
+.forecast-section { margin-top:16px; background:#fff; border:1px solid var(--ui-border); border-radius:10px; overflow:hidden; }
+.forecast-section>.fundamentals-title { border-radius:0; }
+.forecast-reset { padding:3px 7px; border:1px solid #ffffff55; border-radius:4px; background:transparent; color:#fff; font-size:9px; }
+.forecast-section-body { padding:14px; }
+.forecast-layout { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:18px; align-items:start; }
+.forecast-workings, .forecast-layout>div { min-width:0; }
+.forecast-input-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.forecast-card, .forecast-low-options { min-width:0; margin:0; padding:10px 12px; border:1px solid var(--ui-border); border-radius:6px; }
+.forecast-card legend, .forecast-low-options legend { padding:0 5px; color:var(--navy-strong); font-size:12px; font-weight:600; }
+.forecast-card>label, .forecast-option-detail>label { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:5px 8px; margin-bottom:8px; font-size:11px; color:var(--ink); }
+.forecast-section input[type=number], .forecast-section select { width:98px; min-height:26px; max-width:100%; padding:4px 6px; border:1px solid #91a4bc; border-radius:4px; color:var(--ink); background:#fff; font:inherit; font-size:11px; }
+.forecast-section input[type=number] { text-align:right; font-variant-numeric:tabular-nums; }
+.forecast-section input:focus-visible, .forecast-section select:focus-visible { outline:2px solid #ccd7e5; outline-offset:2px; }
+.forecast-card select { width:auto; flex:1; min-width:160px; }
+.forecast-card output { min-width:98px; padding:4px 6px; color:var(--navy-strong); background:#f3f5f8; border-radius:4px; text-align:right; font-variant-numeric:tabular-nums; }
+.forecast-reference { display:flex; flex-wrap:wrap; align-items:center; gap:5px 8px; margin:-2px 0 10px; font-size:10px; color:#7c8898; }
+.forecast-reference button, .forecast-link { padding:0; border:0; background:transparent; color:var(--navy); text-decoration:underline; font-size:10px; }
+.forecast-link { display:block; text-align:left; line-height:1.5; margin-bottom:8px; }
+.forecast-price-result { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:8px; padding-top:8px; border-top:1px solid var(--ui-border); font-size:11px; font-weight:600; color:var(--navy-strong); }
+.forecast-price-result output { min-width:90px; text-align:right; background:transparent; font-size:14px; font-variant-numeric:tabular-nums; }
+.forecast-low-options { margin-top:14px; }
+.forecast-low-option { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:5px 12px; padding:7px 0; border-bottom:1px solid #edf0f3; }
+.forecast-low-option>label { display:flex; align-items:center; gap:6px; font-size:11px; }
+.forecast-low-option input[type=radio] { width:12px; height:12px; margin:0; accent-color:var(--navy); }
+.forecast-low-option output { color:var(--navy-strong); font-size:11px; font-variant-numeric:tabular-nums; }
+.forecast-option-detail { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 12px; padding-top:8px; }
+.forecast-option-detail>label { margin:0; }
+.forecast-option-detail>span { color:#7c8898; font-size:9px; }
+.forecast-zoning { margin-top:14px; }
+.forecast-zoning-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.forecast-zoning h3 { margin:0; font-size:12px; color:var(--navy-strong); }
+.forecast-zoning-heading label { display:flex; align-items:center; gap:8px; font-size:10px; }
+.forecast-zoning-heading select { width:auto; }
+.forecast-zone-bar { position:relative; display:flex; height:26px; border-radius:4px; }
+.forecast-zone-bar>span { display:flex; justify-content:center; align-items:center; font-size:10px; background:#e0eee7; color:#286346; }
+.forecast-zone-bar>span:nth-child(2) { background:#e8edf4; color:var(--navy); }
+.forecast-zone-bar>span:nth-child(3) { background:#f3e5e7; color:#954653; }
+.forecast-zone-bar>i { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--navy-strong); }
+.forecast-zone-ranges { display:grid; grid-template-columns:1fr 2fr 1fr; gap:6px; margin-top:5px; text-align:center; font-size:9px; color:#7c8898; }
+.gain-loss-details { margin-top:10px; font-size:10px; color:var(--navy-soft); }
+.gain-loss-details summary { cursor:pointer; }
+.gain-loss-meter { display:flex; margin-top:8px; min-height:28px; }
+.gain-loss-meter>span { min-width:0; display:flex; justify-content:center; align-items:center; padding:4px; background:#f3e5e7; color:#954653; font-size:10px; }
+.gain-loss-meter>span+span { background:#e0eee7; color:#286346; }
+.forecast-summary { border:1px solid var(--ui-border); border-radius:6px; overflow:hidden; }
+.forecast-summary h3 { margin:0; padding:8px 10px; background:var(--navy); color:white; font-size:12px; font-weight:600; }
+.forecast-summary dl { margin:0; padding:5px 10px; }
+.forecast-summary dl>div { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:7px 0; border-bottom:1px solid #edf0f3; font-size:11px; }
+.forecast-summary dl>div:last-child { border:0; }
+.forecast-summary dt { color:#6f7c8e; }
+.forecast-summary dd { margin:0; font-weight:600; text-align:right; font-variant-numeric:tabular-nums; color:var(--navy-strong); }
+.forecast-zone[data-zone=Buy] { color:#286346; }
+.forecast-zone[data-zone=Sell] { color:#954653; }
+.forecast-assumptions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 16px; }
+.forecast-assumptions label { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 8px; font-size:11px; }
+.forecast-current-yield { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 14px; margin:14px 0 10px; font-size:11px; color:var(--navy-strong); }
+.forecast-current-yield strong { font-size:14px; }
+.forecast-current-yield>span { color:#7c8898; font-size:9px; }
+.forecast-return-table th, .forecast-return-table td { padding:7px 10px; font-size:11px; }
+.forecast-return-table th { font-weight:500; }
+.forecast-return-total th, .forecast-return-total td { background:#e8eef5; color:var(--navy-strong); font-weight:600; }
+.forecast-help { margin:8px 0 0; color:#7c8898; font-size:9px; line-height:1.5; }
+@media(max-width:1000px) { .forecast-layout { grid-template-columns:minmax(0,1fr) 240px; gap:12px; } .forecast-input-grid { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:700px) { .forecast-layout { grid-template-columns:minmax(0,1fr); } .forecast-section-body { padding:10px; } .forecast-assumptions { grid-template-columns:minmax(0,1fr); } }
 .table-year-toggle,.table-value-toggle { appearance:none; border:0; background:transparent; color:inherit; font:inherit; padding:2px 0; cursor:pointer; border-radius:3px; }
 .table-year-toggle { font-weight:inherit; width:100%; }
 .table-value-toggle { min-width:100%; text-align:inherit; }

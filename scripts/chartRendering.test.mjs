@@ -237,15 +237,65 @@ test('year exclusions update the existing chart without adding or replacing char
     const valuationPanel = document.getElementById('panel-valuation');
     assert.equal(valuationPanel.hidden, false);
     assert.equal(document.getElementById('panel-fundamentals').hidden, true);
-    assert.equal(valuationPanel.querySelectorAll('tbody tr').length, 10);
-    const latestRow = [...valuationPanel.querySelectorAll('tbody tr')].find(row => row.querySelector('th').textContent === '2021');
+    assert.equal(valuationPanel.querySelectorAll('.valuation-table tbody tr').length, 10);
+    const latestRow = [...valuationPanel.querySelectorAll('.valuation-table tbody tr')].find(row => row.querySelector('th').textContent === '2021');
     assert.equal(latestRow.querySelectorAll('td')[3].textContent, '17.1');
     await React.act(async () => valuationPanel.querySelector('input[value="5"]').click());
-    assert.equal(valuationPanel.querySelectorAll('tbody tr').length, 5);
+    assert.equal(valuationPanel.querySelectorAll('.valuation-table tbody tr').length, 5);
     await React.act(async () => valuationTab.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
     assert.equal(document.getElementById('panel-fundamentals').hidden, false);
     assert.equal(fundamentalsTab.getAttribute('aria-selected'), 'true');
     assert.equal(document.querySelector('.recharts-wrapper'), chart);
+    const enter = async (element, value) => {
+      assert.ok(element);
+      await React.act(async () => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(element, value);
+        element.dispatchEvent(new window.Event('input', { bubbles: true }));
+      });
+    };
+    const epsForecast = document.querySelector('[aria-label="Earnings per share annual forecast percentage"]');
+    await enter(epsForecast, '10');
+    const epsEstimate = [...document.querySelectorAll('[aria-labelledby="financial-table-title"] tbody tr')].find(row => row.querySelector('th').textContent.includes('Historical EPS')).querySelector('.estimate-cell');
+    assert.equal(epsEstimate.textContent, '2.25');
+    await React.act(async () => valuationTab.click());
+    assert.equal(valuationPanel.querySelector('[data-testid="high-eps-forecast"]').textContent, '2.25');
+    const forecastInput = label => [...valuationPanel.querySelectorAll('label')].find(element => element.firstChild?.textContent.trim() === label)?.querySelector('input');
+    await enter(forecastInput('Forecast average high P/E'), '20');
+    await enter(forecastInput('Forecast average low P/E'), '10');
+    await enter(forecastInput('Forecast average payout (%)'), '50');
+    await React.act(async () => valuationPanel.querySelector('input[name="forecast-low-method"][value="manual"]').click());
+    await enter(valuationPanel.querySelector('[aria-label="Manual low-price forecast"]'), '10');
+    assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '$45.09');
+    assert.equal(valuationPanel.querySelector('[data-testid="forecast-low-price"]').textContent, '$10.00');
+    assert.equal(valuationPanel.querySelector('.forecast-zone').textContent, 'Buy');
+    const yieldRow = [...valuationPanel.querySelectorAll('.forecast-return-table tr')].find(row => row.querySelector('th')?.textContent === 'Estimated average yield');
+    assert.deepEqual([...yieldRow.querySelectorAll('td')].map(cell => cell.textContent), ['2.5%', '3.3%']);
+    await React.act(async () => valuationPanel.querySelector('.forecast-link').click());
+    assert.equal(document.getElementById('panel-fundamentals').hidden, false);
+    await enter(epsForecast, '20');
+    await React.act(async () => valuationTab.click());
+    assert.equal(valuationPanel.querySelector('[data-testid="high-eps-forecast"]').textContent, '3.48');
+    assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '$69.67');
+    assert.equal(forecastInput('Forecast average high P/E').value, '20');
+    assert.equal(document.querySelectorAll('.recharts-wrapper').length, 1);
+    const januaryStudy = { ...annualStudy, id: 'january-year-display', quarterly: [], annual: annualStudy.annual.map(row => ({ ...row, fiscalYear: Number(row.periodEnd.slice(0, 4)), periodEnd: `${row.periodEnd.slice(0, 4)}-01-31` })) };
+    await React.act(async () => { root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: januaryStudy, onBack() {}, onRefresh() {} }))); });
+    await React.act(async () => { await new Promise(resolve => window.requestAnimationFrame(resolve)); });
+    await React.act(async () => document.getElementById('tab-fundamentals').click());
+    const shiftedDot = document.querySelector('circle.draggable-series-sales[data-fiscal-year="2021"]');
+    assert.equal(shiftedDot.getAttribute('data-display-year'), '2020');
+    const shiftedTick = document.querySelector('.year-tick[aria-label*="2020"]');
+    assert.equal(Number(shiftedDot.getAttribute('cx')), Number(shiftedTick.getAttribute('transform').match(/translate\(([^,]+)/)[1]));
+    for (const section of ['financial-table-title', 'management-table-title']) {
+      const headers = [...document.querySelectorAll(`[aria-labelledby="${section}"] thead th`)].map(cell => cell.textContent);
+      assert.ok(headers.includes('2020'));
+      assert.ok(!headers.includes('2021'));
+    }
+    assert.equal([...document.querySelectorAll('.valuation-table tbody th')].at(-1).textContent, '2020');
+    await React.act(async () => shiftedTick.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+    assert.equal(document.querySelector('circle.draggable-series-sales[data-fiscal-year="2021"]'), null);
+    assert.equal(document.querySelectorAll('[aria-labelledby="financial-table-title"] tbody td.excluded-year-value').length, 5);
+    assert.equal(januaryStudy.annual.at(-1).periodEnd, '2021-01-31');
   } finally {
     await React.act(async () => root.unmount());
     dom.window.close();
