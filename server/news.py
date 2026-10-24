@@ -74,17 +74,23 @@ def normalize_news(items):
 
 
 @lru_cache(maxsize=64)
-def _fetch_news(symbol, interval):
+def _fetch_news(symbol, interval, count=25):
     try:
-        items = yf.Ticker(symbol).get_news(count=25, tab='news')
+        items = yf.Ticker(symbol).get_news(count=count, tab='news')
     except Exception:
         items = None
     if not items:
-        items = yf.Search(symbol, max_results=0, news_count=25).news
+        items = yf.Search(symbol, max_results=0, news_count=count).news
     if not isinstance(items, list):
         raise ValueError('Unexpected news response.')
-    return {'ticker': symbol, 'articles': normalize_news(items), 'retrievedAt': datetime.now(timezone.utc).isoformat()}
+    return {'ticker': symbol, 'articles': normalize_news(items),
+            # Yahoo can return fewer items than requested and still have older
+            # coverage. The client stops when expanding adds no new articles.
+            'nextCount': count + 25 if items and count < 250 else None,
+            'retrievedAt': datetime.now(timezone.utc).isoformat()}
 
 
-def get_news(ticker):
-    return _fetch_news(ticker.replace('.', '-'), int(time.time() // 300))
+def get_news(ticker, count=25):
+    if count not in range(25, 251, 25):
+        raise ValueError('News count must be a multiple of 25 between 25 and 250.')
+    return _fetch_news(ticker.replace('.', '-'), int(time.time() // 300), count)

@@ -36,6 +36,28 @@ test('equal-thirds zoning changes the boundaries without changing the price fore
   assert.ok(Math.abs(model.sellLower - (100 - 80 / 3)) < 1e-12);
 });
 
+test('manual high and low prices drive risk and returns and imply a consistent P/E', () => {
+  const model = riskReward({ ...inputs, highMethod: 'manual', manualHigh: 150, highPE: 99, lowMethod: 'manual', manualLow: 25 });
+  assert.equal(model.highPrice, 150);
+  assert.equal(model.lowPrice, 25);
+  assert.equal(model.forecastHighPE, 30);
+  assert.equal(model.averagePE, 20);
+  assert.equal(model.upsideDownside, 110 / 15);
+  assert.equal(model.highReturns.averageYield, 50 / 30);
+  assert.ok(Math.abs(model.highReturns.priceCAGR - ((150 / 40) ** 0.2 - 1) * 100) < 1e-12);
+  const noEPS = riskReward({ ...inputs, highMethod: 'manual', manualHigh: 150, highEPS: null, lowPE: null, lowEPS: null, lowMethod: 'manual', manualLow: 25 });
+  assert.equal(noEPS.validRange, true);
+  assert.equal(noEPS.highPrice, 150);
+  assert.equal(noEPS.lowPrice, 25);
+  assert.equal(noEPS.forecastHighPE, null);
+  assert.equal(noEPS.highReturns.averageYield, null);
+  assert.equal(noEPS.highReturns.priceCAGR, model.highReturns.priceCAGR);
+  for (const manualHigh of [null, 0, -10, Infinity]) {
+    assert.equal(riskReward({ ...inputs, highMethod: 'manual', manualHigh }).highPrice, null);
+  }
+  assert.equal(riskReward({ ...inputs, highMethod: 'manual', manualHigh: 10 }).zone, 'Check forecasts');
+});
+
 test('five-year returns separate price CAGR, payout-based yield and the additive annual estimate', () => {
   const model = riskReward(inputs);
   assert.equal(model.currentYield, 2.5);

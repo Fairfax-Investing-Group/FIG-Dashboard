@@ -1,7 +1,7 @@
 """Local API and production static server. Run with python -m server.app."""
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import json
 import traceback
 import os
@@ -41,7 +41,13 @@ class Handler(SimpleHTTPRequestHandler):
         news_match = re.fullmatch(r'/api/news/([A-Z0-9][A-Z0-9.\-]{0,14})', path)
         if news_match:
             try:
-                return self.json_response(200, get_news(news_match.group(1)))
+                count = int(parse_qs(urlparse(self.path).query).get('count', ['25'])[0])
+                if count not in range(25, 251, 25):
+                    raise ValueError('Invalid news count.')
+            except ValueError:
+                return self.json_response(400, {'error': 'Invalid news count.'})
+            try:
+                return self.json_response(200, get_news(news_match.group(1), count))
             except Exception:
                 return self.json_response(503, {'error': 'Recent news is temporarily unavailable. Please try again.'})
         quote_match = re.fullmatch(r'/api/quotes/([A-Z0-9][A-Z0-9.\-]{0,14})', path)

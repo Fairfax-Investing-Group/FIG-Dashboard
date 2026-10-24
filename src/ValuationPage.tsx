@@ -45,5 +45,5 @@ export default function ValuationPage({ study, annual, quote, highEPSForecast, e
     </table>{!annual.length && <p className="table-empty">Annual financial data is unavailable for this study.</p>}</div>
     <div className="valuation-summary"><span>5 Year Average P/E <strong>{number(averagePE)}</strong></span><span title={current.peSource}>Current P/E (TTM) <strong>{number(current.currentPE)}</strong></span></div>
     <p className="valuation-source-note">High/low P/E = fiscal-year high/low price ÷ annual EPS. Current row uses 52-week prices and {current.epsSource.toLowerCase()}. Averages use available observations; — unavailable, N/M nonpositive EPS.{!compatible && ' Historical P/E and yield require matching price and reporting currencies.'}</p>
-  </section><RiskReward study={study} current={current} history={allRows} highEPSForecast={highEPSForecast} epsForecastRate={epsForecastRate} onEditEPSForecast={onEditEPSForecast}/></>;
+  </section><RiskReward study={study} current={current} history={includedRows} highEPSForecast={highEPSForecast} epsForecastRate={epsForecastRate} onEditEPSForecast={onEditEPSForecast}/></>;
 }
