@@ -114,6 +114,7 @@ class StudyStagesTests(unittest.TestCase):
             with patch('server.app.company_for', return_value=self.company), patch('server.studies.fetch_financials', return_value=self.financials), patch('server.studies.fetch_prices', return_value=self.prices), patch('server.studies.fetch_market', return_value={'profile': self.profile}), patch('server.peers.add_peers'), patch.object(Handler, 'log_message'):
                 initial = requests.post(url + '?stage=fundamentals', json={'ticker': 'TEST', 'cik': 123}, timeout=3)
                 self.assertEqual(initial.status_code, 201)
+                self.assertEqual(initial.headers.get('Content-Encoding'), 'gzip')
                 core = initial.json()
                 study_id = core['Study']['StudyID']
                 self.assertEqual(core['Metadata']['DataStage'], 'fundamentals')
@@ -122,6 +123,10 @@ class StudyStagesTests(unittest.TestCase):
                 self.assertEqual(final.json()['Study']['StudyID'], study_id)
                 self.assertEqual(final.json()['Metadata']['DataStage'], 'complete')
                 self.assertEqual(requests.get(f'{url}/{study_id}', timeout=3).json(), final.json())
+                uncompressed = requests.get(f'{url}/{study_id}', headers={'Accept-Encoding': 'gzip;q=0'}, timeout=3)
+                self.assertNotIn('Content-Encoding', uncompressed.headers)
+                self.assertEqual(uncompressed.json(), final.json())
+                self.assertLess(int(final.headers['Content-Length']), len(uncompressed.content))
         finally:
             server.shutdown()
             server.server_close()

@@ -3,6 +3,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import json
+import gzip
 import traceback
 import os
 import re
@@ -17,14 +18,32 @@ STUDY_SLOTS = threading.BoundedSemaphore(4)
 COMPLETION_SLOTS = threading.BoundedSemaphore(2)
 
 
+def accepts_gzip(header):
+    for entry in header.lower().split(','):
+        encoding, *parameters = entry.strip().split(';')
+        if encoding == 'gzip':
+            try:
+                quality = next((float(value.split('=', 1)[1]) for value in parameters if value.strip().startswith('q=')), 1)
+            except ValueError:
+                return False
+            return 0 < quality <= 1
+    return False
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT / 'dist'), **kwargs)
 
     def json_response(self, status, data):
         body = json.dumps(data, allow_nan=False, indent=2).encode()
+        compressed = len(body) >= 1024 and accepts_gzip(self.headers.get('Accept-Encoding', ''))
+        if compressed:
+            body = gzip.compress(body, compresslevel=1, mtime=0)
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        self.send_header('Vary', 'Accept-Encoding')
+        if compressed:
+            self.send_header('Content-Encoding', 'gzip')
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()

@@ -48,7 +48,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
         build.onResolve({ filter: /^react(?:\/|$)/, namespace: 'test-pages' }, args => ({ path: args.path, external: true }));
         build.onResolve({ filter: /^\.\/(StudyPage|SearchPage|LoginPage)$/ }, args => ({ path: args.path, namespace: 'test-pages' }));
         build.onLoad({ filter: /.*/, namespace: 'test-pages' }, args => ({ loader: 'jsx', contents: args.path === './StudyPage'
-          ? `import React, {useEffect,useState} from 'react'; export default function Page(props) {
+          ? `import React, {useEffect,useState} from 'react'; window.studyCodeLoaded = true; export default function Page(props) {
               const [edit,setEdit] = useState('');
               useEffect(() => props.onFundamentalsReady(props.study.id), [props.study.id,props.onFundamentalsReady]);
               return <main data-study={props.study.id}><h1>{props.study.company.name}</h1><input aria-label="Forecast" value={edit} onChange={e=>setEdit(e.target.value)}/><span data-status>{props.detailsStatus}</span><button onClick={props.onBack}>Back</button><button onClick={props.onRetryDetails}>Retry details</button></main>;
@@ -68,6 +68,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
     await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(App))));
     await click('Create study');
     assert.equal(calls.length, 1);
+    assert.equal(window.studyCodeLoaded, true, 'Study/chart code downloads before the financial response arrives');
     assert.equal(completions.length, 0);
     assert.match(document.body.textContent, /Loading financials/);
     await React.act(async () => { core.resolve(response(doc(firstId, 'fundamentals'))); await settle(); });

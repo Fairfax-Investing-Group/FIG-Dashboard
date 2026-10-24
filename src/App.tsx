@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
 import LoginPage from './LoginPage';
-const StudyPage = lazy(() => import('./StudyPage'));
+const loadStudyPage = () => import('./StudyPage');
+const StudyPage = lazy(loadStudyPage);
 import type { StudyDocument } from './types';
 import { studyView } from './studyDocument';
 
@@ -53,6 +54,7 @@ export default function App() {
     request.current = controller;
     setLoading(true);
     setError(null);
+    void loadStudyPage().catch(() => {});
     fetch(`/api/studies/${match[1]}`, { signal: controller.signal })
       .then(readResponse)
       .then(data => { cache.current.set(data.Study.StudyID, data); setStudyDocument(data); })
@@ -84,6 +86,9 @@ export default function App() {
 
   async function createStudy(company: Company) {
     if (request.current && !request.current.signal.aborted && loading) return;
+    // Download the page/chart code while the fresh financial data is fetched.
+    // React still mounts it only after that data is ready.
+    void loadStudyPage().catch(() => {});
     const controller = new AbortController();
     request.current = controller;
     setPending(company);
