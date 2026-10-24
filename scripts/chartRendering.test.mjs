@@ -28,7 +28,7 @@ test('year exclusions update the existing chart without adding or replacing char
     createdAt: '2026-10-23T00:00:00Z', financialCurrency: 'USD', priceCurrency: 'USD', warnings: [],
     epsAdjustment: { status: 'normalized' }, sources: { sec: source, yfinance: source },
     annual: Array.from({ length: 5 }, (_, i) => ({ periodEnd: `${2016 + i}-12-31`, sales: (100 + i * 10) * 1e6, eps: 1 + i / 10,
-      pretaxProfit: (10 + i) * 1e6, bookValuePerShare: 5 + i, freeCashFlowPerShare: 2 + i / 10,
+      pretaxMargin: 26 + i, returnOnEquity: 14 + i, debtToCapital: 2 + i, pretaxProfit: (10 + i) * 1e6, bookValuePerShare: 5 + i, freeCashFlowPerShare: 2 + i / 10,
       highPrice: 20 + i, lowPrice: 10 + i, dividendPerShare: 0.1, freeCashFlow: (2 + i / 10) * 10, dilutedShares: 10, shareDays: 365, epsSplitFactor: 1, salesSource: null, epsSource: null, pretaxProfitSource: null })),
     prices: Array.from({ length: 5 }, (_, i) => ({ date: `${2016 + i}-12-31`, close: 10 + i })),
   };
@@ -128,9 +128,58 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.deepEqual([...document.querySelectorAll('[aria-labelledby="financial-table-title"] tbody .calculated-column')].map(cell => cell.textContent), originalGrowth);
     const middleYear = document.querySelector('.year-tick[aria-label*="2018"]');
     await React.act(async () => { middleYear.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
-    const gappedPath = chart.querySelector('.draggable-series-sales path.recharts-line-curve[stroke-width="1.5"]').getAttribute('d');
-    assert.equal((gappedPath.match(/M/g) || []).length, 2, 'An excluded interior year breaks the actual line into separate segments');
+    for (const key of financialKeys) {
+      const connectedPath = chart.querySelector(`.draggable-series-${key} path.recharts-line-curve[stroke-width="1.5"]`).getAttribute('d');
+      assert.equal((connectedPath.match(/M/g) || []).length, 1, 'Excluding an interior year keeps a single connected actual line');
+      assert.equal((connectedPath.match(/L/g) || []).length, 3, 'The four remaining observations connect directly');
+      assert.equal(chart.querySelectorAll(`circle.draggable-series-${key}[data-fiscal-year="2018"]`).length, 0);
+      const coordinates = [...connectedPath.matchAll(/[ML]([^,]+),([^ML]+)/g)].map(match => [Number(match[1]), Number(match[2])]);
+      const expected = originalDots.get(key).filter((_, index) => index !== 2);
+      for (let index = 0; index < coordinates.length; index++) {
+        assert.ok(Math.abs(coordinates[index][0] - Number(expected[index][0])) < 0.001);
+        assert.ok(Math.abs(coordinates[index][1] - Number(expected[index][1])) < 0.001);
+      }
+    }
     await React.act(async () => { document.querySelector('.year-tick[aria-label*="2018"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+    // A single cell changes only its own series; year headings synchronize all tables.
+    const click = async element => React.act(async () => element.click());
+    const salesCell = () => table.querySelector('button[aria-label="Exclude Sales for 2018"],button[aria-label="Restore Sales for 2018"]');
+    await click(salesCell());
+    assert.equal(salesCell().getAttribute('aria-pressed'), 'true');
+    assert.equal(chart.querySelectorAll('circle.draggable-series-sales').length, 4);
+    assert.equal(chart.querySelectorAll('circle.draggable-series-eps').length, 5);
+    assert.equal((chart.querySelector('.draggable-series-sales path.recharts-line-curve[stroke-width="1.5"]').getAttribute('d').match(/M/g) || []).length, 1);
+    const management = document.querySelector('[aria-labelledby="management-table-title"]');
+    await click(management.querySelector('button[aria-label="Exclude year 2019 in Evaluate Management"]'));
+    assert.equal(chart.querySelectorAll('circle.draggable-series-sales').length, 4);
+    assert.equal(chart.querySelectorAll('circle.draggable-series-eps').length, 5);
+    assert.ok(table.querySelector('button[aria-label="Exclude year 2019 in company data and valuation"]'));
+    assert.equal(management.querySelector('.management-average').textContent, '27.8%');
+    await click(table.querySelector('button[aria-label="Exclude year 2019 in company data and valuation"]'));
+    assert.equal(chart.querySelectorAll('circle.draggable-series-sales').length, 3);
+    assert.equal(chart.querySelectorAll('circle.draggable-series-eps').length, 4);
+    assert.ok(document.querySelector('.valuation-table button[aria-label="Restore year 2019 in company data and valuation"]'));
+    await click(table.querySelector('button[aria-label="Restore year 2019 in company data and valuation"]'));
+    assert.ok(management.querySelector('button[aria-label="Restore year 2019 in Evaluate Management"]'), 'Company-data changes do not restore management exclusions');
+    assert.equal(salesCell().getAttribute('aria-pressed'), 'true');
+    await click(management.querySelector('.table-exclusion-help button'));
+    assert.equal(management.querySelector('.management-average').textContent, '28.0%');
+    assert.equal(salesCell().getAttribute('aria-pressed'), 'true', 'Management reset does not restore company-data exclusions');
+    await click(salesCell());
+    assert.equal(chart.querySelectorAll('circle.draggable-series-sales').length, 5);
+    await click(management.querySelector('button[aria-label="Exclude % Pre-Tax Profit on Sales for 2020"]'));
+    assert.equal(management.querySelector('.management-average').textContent, '27.5%');
+    await click(management.querySelector('button[aria-label="Restore % Pre-Tax Profit on Sales for 2020"]'));
+    assert.equal(management.querySelector('.management-average').textContent, '28.0%');
+    await click(document.querySelector('#tab-valuation'));
+    const valuation = document.querySelector('.valuation-table');
+    await click(valuation.querySelector('button[aria-label="Exclude Earnings per share for 2018"]'));
+    assert.equal(table.querySelector('button[aria-label="Restore Earnings per share for 2018"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(chart.querySelectorAll('circle.draggable-series-eps').length, 4);
+    assert.equal(chart.querySelectorAll('circle.draggable-series-sales').length, 5);
+    await click(document.querySelector('#panel-valuation .table-exclusion-help button'));
+    assert.equal(chart.querySelectorAll('circle.draggable-series-eps').length, 5);
+    await click(document.querySelector('#tab-fundamentals'));
     const quarterStudy = { ...study, quarterly: [
       { ...study.annual[0], periodEnd: '2019-03-31', fiscalYear: 2019, quarter: 1 },
       { ...study.annual[4], periodEnd: '2020-03-31', fiscalYear: 2020, quarter: 1 },

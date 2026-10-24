@@ -7,6 +7,7 @@ import { nearestChartLine, nearestObservation, interpolatedObservation } from '.
 import { trailingFinancials } from './trailingFinancials';
 import { reportingYear, reportingYearOffset } from './reportingYears';
 import ValuationPage from './ValuationPage';
+import { ExclusionYear, ExclusionValue, ExclusionHelp, isValueExcluded, metricExcludedYears, valueId, type TableExclusions } from './ExclusionControls';
 
 const metrics: { key: FinancialChartKey; title: string; color: string; note: string }[] = [
   { key: 'sales', title: 'Sales', color: '#2563eb', note: 'Annual revenue' },
@@ -185,7 +186,7 @@ function YearTick({ x = 0, y = 0, payload, excludedYears, onToggle }: { x?: numb
   </g>;
 }
 
-function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYears }: { annual: AnnualRow[]; study: Study; excludedYears: number[]; onToggleYear: (year: number) => void; onRestoreYears: () => void }) {
+function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYears, excludedValues, onResetExclusions }: { annual: AnnualRow[]; study: Study; excludedYears: number[]; excludedValues: string[]; onToggleYear: (year: number) => void; onRestoreYears: () => void; onResetExclusions: () => void }) {
   const [offsets, setOffsets] = useState<Partial<Record<ChartKey, number>>>({});
   const [hidden, setHidden] = useState<ChartLineId[]>([]);
   const yearOffset = reportingYearOffset(annual);
@@ -208,17 +209,17 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
     const baseline = source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.[metric.key];
     const data = source.map(point => ({ ...point, [metric.key]: point[metric.key] == null ? null : baseline == null ? (point[metric.key] === 0 ? 0 : null) : point[metric.key]! / Math.abs(baseline) * 100 }));
     const annualPoints = data.filter(point => point.quarter == null).map(point => ({ periodEnd: new Date(point.timestamp).toISOString().slice(0, 10), value: point[metric.key] ?? null }));
-    const includedRegression = metric.key === 'close' ? null : logLinearRegression(annualPoints, excludedYears, annualPoints.map(point => point.periodEnd));
+    const includedRegression = metric.key === 'close' ? null : logLinearRegression(annualPoints, metricExcludedYears({ excludedYears, excludedValues }, metric.key), annualPoints.map(point => point.periodEnd));
     // Keep a clearly labelled reference fit if exclusions leave too few points.
     // Growth calculations in the table still become unavailable in that case.
-    const regression = includedRegression ?? (metric.key !== 'close' && excludedYears.length > 0 ? logLinearRegression(annualPoints) : null);
+    const regression = includedRegression ?? (metric.key !== 'close' && metricExcludedYears({ excludedYears, excludedValues }, metric.key).length > 0 ? logLinearRegression(annualPoints) : null);
     const referenceFit = includedRegression === null && regression !== null;
     const regressionData: ChartPoint[] = regression?.fitted.map(point => ({ timestamp: timestamp(point.periodEnd), [metric.key]: point.value })) ?? [];
     const latest = source.filter(point => point.quarter == null && point[metric.key] != null).at(-1);
     return { ...metric, data, rawData: source, referenceFit, regressionRaw: regressionData.map(point => ({ timestamp: point.timestamp, [metric.key]: point[metric.key]! * Math.abs(baseline!) / 100 })), regressionData, regressionRate: includedRegression?.growthRate ?? null, latest, baselineDate: source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.reportedAt ?? source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.timestamp };
   });
   const lines = series.flatMap(metric => {
-    const actual = metric.rawData.filter(point => point[metric.key] != null && (metric.key === 'close' || !excludedYears.includes(point.displayYear ?? new Date(point.timestamp).getUTCFullYear()))).map(point => ({ timestamp: point.timestamp, value: point[metric.key]! }));
+    const actual = metric.rawData.filter(point => point[metric.key] != null && (metric.key === 'close' || !isValueExcluded({ excludedYears, excludedValues }, metric.key, point.displayYear ?? new Date(point.timestamp).getUTCFullYear()))).map(point => ({ timestamp: point.timestamp, value: point[metric.key]! }));
     const fit = metric.regressionRaw.map(point => ({ timestamp: point.timestamp, value: point[metric.key]! }));
     return [
       ...(actual.length ? [{ id: `${metric.key}:actual` as ChartLineId, key: metric.key, name: `${metric.title} · Actual`, color: metric.color, kind: 'actual' as const, observations: actual }] : []),
@@ -260,7 +261,9 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
   });
   const isolatedPoints = visible.length === 1 ? originalSpaced.filter(metric => metric.key === visible[0].key).flatMap(metric => metric.data.map(point => point[metric.key]).filter((value): value is number => value != null)) : [];
   const spaced = originalSpaced.map(metric => ({ ...metric,
-    data: metric.data.map(point => ({ ...point, [metric.key]: point[metric.key] == null || (metric.key !== 'close' && excludedYears.includes(point.displayYear ?? new Date(point.timestamp).getUTCFullYear())) ? null : point[metric.key]! + (offsets[metric.key] ?? 0) })),
+    // Remove excluded observations rather than leaving null placeholders, so
+    // both the rendered line and hover geometry connect their surviving neighbors.
+    data: metric.data.filter(point => metric.key === 'close' || !isValueExcluded({ excludedYears, excludedValues }, metric.key, point.displayYear ?? new Date(point.timestamp).getUTCFullYear())).map(point => ({ ...point, [metric.key]: point[metric.key] == null ? null : point[metric.key]! + (offsets[metric.key] ?? 0) })),
     regressionData: metric.regressionData.map(point => ({ ...point, [metric.key]: point[metric.key]! + (offsets[metric.key] ?? 0) })),
   }));
   const hoverLines: HoverLine[] = visibleLines.map(line => {
@@ -284,7 +287,7 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
         const action = hidden.includes(line.id) ? 'Show' : 'Hide';
         return <button key={line.id} title={`${action} ${line.name}`} aria-label={`${action} ${line.name}`} aria-pressed={!hidden.includes(line.id)} onClick={() => toggleLine(line.id)}><i style={{ background: metric.color, opacity: line.kind === 'fit' ? 0.4 : 1 }}/>{action === 'Hide' ? 'H' : 'S'}{line.kind === 'fit' ? 'F' : 'A'}</button>;
       })}</div>
-    </div>)}<div className="sidebar-chart-controls"><p className="legend-control-key">HA/SA: Hide/Show Actual · HF/SF: Hide/Show Fit</p><div><button onClick={() => { setOffsets({}); setHidden([]); onRestoreYears(); }}>Reset chart</button>{excludedYears.length > 0 && <button onClick={onRestoreYears}>Restore years</button>}</div></div></aside>
+    </div>)}<div className="sidebar-chart-controls"><p className="legend-control-key">HA/SA: Hide/Show Actual · HF/SF: Hide/Show Fit</p><div><button onClick={() => { setOffsets({}); setHidden([]); onResetExclusions(); }}>Reset chart</button>{excludedYears.length > 0 && <button onClick={onRestoreYears}>Restore years</button>}</div></div></aside>
     <div className="chart-main">
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 4, right: 8, bottom: 0, left: 0 }} accessibilityLayer>
       <CartesianGrid vertical horizontal={false} stroke="#e8edf0" syncWithTicks/>
@@ -302,7 +305,8 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
 }
 
 type FinancialForecasts = { sales: string; eps: string };
-function FinancialTable({ annual, study, excludedYears, forecasts, onForecastChange }: { annual: AnnualRow[]; study: Study; excludedYears: number[]; forecasts: FinancialForecasts; onForecastChange: (key: keyof FinancialForecasts, value: string) => void }) {
+function FinancialTable({ annual, study, controls, forecasts, onForecastChange }: { annual: AnnualRow[]; study: Study; controls: TableExclusions; forecasts: FinancialForecasts; onForecastChange: (key: keyof FinancialForecasts, value: string) => void }) {
+  const { excludedYears } = controls;
   const rows = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
   const yearOffset = reportingYearOffset(annual);
   const currency = study.financialCurrency === 'USD' ? '$' : study.financialCurrency || 'Currency unavailable';
@@ -315,25 +319,26 @@ function FinancialTable({ annual, study, excludedYears, forecasts, onForecastCha
   };
   return <section className="financial-table-section fundamentals" aria-labelledby="financial-table-title">
     <div className="fundamentals-title"><h2 id="financial-table-title">Fundamental Company Data</h2><span>Annual financials</span></div>
+    <ExclusionHelp controls={controls}/>
     <div className="financial-table-scroll"><table>
       <caption className="sr-only">Annual company data by fiscal year, historical annualized growth, forecast assumptions, and five-year estimates. EPS is split-normalized.</caption>
-      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd} className={excludedYears.includes(reportingYear(row, yearOffset)) ? 'excluded-year-heading' : undefined} title={`Fiscal year ended ${displayDate(row.periodEnd)}${excludedYears.includes(reportingYear(row, yearOffset)) ? ' · Excluded from growth' : ''}`}>{reportingYear(row, yearOffset)}</th>)}<th scope="col" className="calculated-column">Growth (%)</th><th scope="col">Forecast (%)</th><th scope="col">5 Yr Est</th></tr></thead>
+      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd} className={excludedYears.includes(reportingYear(row, yearOffset)) ? 'excluded-year-heading' : undefined} title={`Fiscal year ended ${displayDate(row.periodEnd)}${excludedYears.includes(reportingYear(row, yearOffset)) ? ' · Excluded from growth' : ''}`}><ExclusionYear year={reportingYear(row, yearOffset)} controls={controls}/></th>)}<th scope="col" className="calculated-column">Growth (%)</th><th scope="col">Forecast (%)</th><th scope="col">5 Yr Est</th></tr></thead>
       <tbody>{metrics.map(metric => {
         const perShare = metric.key !== 'sales' && metric.key !== 'pretaxProfit';
         const scale = perShare ? 1 : 1_000_000;
         const supported = rows.filter(row => row[metric.key] != null);
-        const included = supported.filter(row => !excludedYears.includes(reportingYear(row, yearOffset)));
+        const included = supported.filter(row => !isValueExcluded(controls, metric.key, reportingYear(row, yearOffset)));
         const first = included[0];
-        const latest = supported.at(-1);
-        const growth = annualGrowth(rows.map(row => ({ periodEnd: `${reportingYear(row, yearOffset)}-01-01`, value: row[metric.key] ?? null })), excludedYears);
+        const latest = included.at(-1);
+        const growth = annualGrowth(rows.map(row => ({ periodEnd: `${reportingYear(row, yearOffset)}-01-01`, value: row[metric.key] ?? null })), metricExcludedYears(controls, metric.key));
         const forecastKey = metric.key === 'sales' || metric.key === 'eps' ? metric.key : null;
         const estimate = forecastKey ? fiveYearEstimate(latest?.[metric.key] ?? null, forecasts[forecastKey]) : null;
         return <tr key={metric.key}>
           <th scope="row">{labels[metric.key]}</th>
           {rows.map(row => {
-            const excluded = excludedYears.includes(reportingYear(row, yearOffset));
+            const excluded = isValueExcluded(controls, metric.key, reportingYear(row, yearOffset));
             const value = money(row[metric.key] == null ? null : row[metric.key]! / scale, null, perShare);
-            return <td key={row.periodEnd} className={excluded ? 'excluded-year-value' : undefined} title={excluded ? 'Excluded from growth calculations' : undefined}>{excluded ? <del>{value}</del> : value}</td>;
+            return <td key={row.periodEnd} className={excluded ? 'excluded-year-value' : undefined} title={excluded ? 'Excluded from growth calculations' : undefined}><ExclusionValue metric={metric.key} year={reportingYear(row, yearOffset)} name={metric.title} available={row[metric.key] != null} controls={controls}>{value}</ExclusionValue></td>;
           })}
           <td className="calculated-column" title={first && included.at(-1) ? `Log-linear regression across included fiscal years: ${displayDate(first.periodEnd)} to ${displayDate(included.at(-1)!.periodEnd)}` : undefined}>{growth === null ? '—' : `${growth.toFixed(1)}%`}</td>
           <td className="forecast-cell">{forecastKey ? <input type="number" step="0.1" min="-100" value={forecasts[forecastKey]} placeholder="—" aria-label={`${metric.title} annual forecast percentage`} onChange={event => onForecastChange(forecastKey, event.target.value)}/> : '—'}</td>
@@ -351,26 +356,30 @@ function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (num
   const min = Math.min(0, ...available.map(point => point.value)), max = Math.max(0, ...available.map(point => point.value));
   const x = (index: number) => padding + index / Math.max(1, values.length - 1) * (width - padding * 2);
   const y = (value: number) => max === min ? height / 2 : height - padding - (value - min) / (max - min) * (height - padding * 2);
-  const segments: { value: number; index: number }[][] = [];
-  available.forEach(point => {
-    const segment = segments.at(-1);
-    if (segment && segment.at(-1)!.index === point.index - 1) segment.push(point);
-    else segments.push([point]);
-  });
+  const path = available.map((point, index) => `${index ? 'L' : 'M'}${x(point.index)},${y(point.value)}`).join(' ');
   const first = available[0], last = available.at(-1)!;
   const improved = lowerIsBetter ? last.value <= first.value : last.value >= first.value;
   const color = improved ? '#238454' : '#cc4850';
   return <svg className="management-trend" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${name}: ${first.value.toFixed(1)}% to ${last.value.toFixed(1)}%`}>
     <line x1={padding} x2={width - padding} y1={y(0)} y2={y(0)} stroke="#d5dfd9"/>
-    {segments.map((segment, index) => {
-      const path = segment.map((point, index) => `${index ? 'L' : 'M'}${x(point.index)},${y(point.value)}`).join(' ');
-      return <g key={index}><path d={`${path} L${x(segment.at(-1)!.index)},${y(0)} L${x(segment[0].index)},${y(0)} Z`} fill={color} fillOpacity={0.18}/><path d={path} stroke={color} strokeWidth={1.8} fill="none" strokeLinejoin="round"/></g>;
-    })}
+    <path d={`${path} L${x(last.index)},${y(0)} L${x(first.index)},${y(0)} Z`} fill={color} fillOpacity={0.18}/>
+    <path d={path} stroke={color} strokeWidth={1.8} fill="none" strokeLinejoin="round"/>
     {[first, last].map((point, index) => <circle key={index} cx={x(point.index)} cy={y(point.value)} r={2.2} fill={color}/>)}
   </svg>;
 }
 
 function ManagementTable({ annual }: { annual: AnnualRow[] }) {
+  const [excludedYears, setExcludedYears] = useState<number[]>([]);
+  const [excludedValues, setExcludedValues] = useState<string[]>([]);
+  const controls: TableExclusions = {
+    scope: 'management', excludedYears, excludedValues,
+    onToggleYear: year => setExcludedYears(current => current.includes(year) ? current.filter(value => value !== year) : [...current, year]),
+    onToggleValue: (metric, year) => {
+      const id = valueId(metric, year);
+      setExcludedValues(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+    },
+    onResetExclusions: () => { setExcludedYears([]); setExcludedValues([]); },
+  };
   const rows = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
   const yearOffset = reportingYearOffset(annual);
   const definitions = [
@@ -381,13 +390,14 @@ function ManagementTable({ annual }: { annual: AnnualRow[] }) {
   const percentage = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
   return <section className="financial-table-section fundamentals management" aria-labelledby="management-table-title">
     <div className="fundamentals-title"><h2 id="management-table-title">Evaluate Management</h2><span>Profitability & capital</span></div>
+    <ExclusionHelp controls={controls}/>
     <div className="financial-table-scroll"><table>
       <caption className="sr-only">Annual management ratios, latest five-year averages, and historical trends.</caption>
-      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd}>{reportingYear(row, yearOffset)}</th>)}<th scope="col" className="calculated-column">5 Yr Avg</th><th scope="col">Trend</th></tr></thead>
+      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd}><ExclusionYear year={reportingYear(row, yearOffset)} controls={controls}/></th>)}<th scope="col" className="calculated-column">5 Yr Avg</th><th scope="col">Trend</th></tr></thead>
       <tbody>{definitions.map(metric => {
-        const values = rows.map(row => row[metric.key] ?? null);
+        const values = rows.map(row => isValueExcluded(controls, metric.key, reportingYear(row, yearOffset)) ? null : row[metric.key] ?? null);
         return <tr key={metric.key}><th scope="row">{metric.name}</th>
-          {rows.map((row, index) => <td key={row.periodEnd} className={index >= rows.length - 5 ? 'recent-ratio' : undefined}>{percentage(values[index])}</td>)}
+          {rows.map((row, index) => <td key={row.periodEnd} className={index >= rows.length - 5 ? 'recent-ratio' : undefined}><ExclusionValue metric={metric.key} year={reportingYear(row, yearOffset)} name={metric.name} available={row[metric.key] != null} controls={controls}>{percentage(row[metric.key] ?? null)}</ExclusionValue></td>)}
           <td className="calculated-column management-average">{percentage(fiveYearAverage(values))}</td>
           <td className="management-trend-cell"><ManagementTrend values={values} name={metric.name} lowerIsBetter={metric.lowerIsBetter}/></td>
         </tr>;
@@ -472,11 +482,19 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
   const { quote, quoteStatus } = useMarketQuote(study.company.ticker);
   const [yearExclusions, setYearExclusions] = useState<Record<string, number[]>>({});
   const excludedYears = yearExclusions[study.id] ?? [];
+  const [valueExclusions, setValueExclusions] = useState<Record<string, string[]>>({});
+  const excludedValues = valueExclusions[study.id] ?? [];
+  const toggleValue = (metric: string, year: number) => setValueExclusions(current => {
+    const values = current[study.id] ?? [], id = valueId(metric, year);
+    return { ...current, [study.id]: values.includes(id) ? values.filter(value => value !== id) : [...values, id] };
+  });
+  const resetExclusions = () => { restoreYears(); setValueExclusions(current => ({ ...current, [study.id]: [] })); };
   const restoreYears = () => setYearExclusions(current => ({ ...current, [study.id]: [] }));
   const toggleYear = (year: number) => setYearExclusions(current => {
     const years = current[study.id] ?? [];
     return { ...current, [study.id]: years.includes(year) ? years.filter(item => item !== year) : [...years, year] };
   });
+  const controls: TableExclusions = { excludedYears, excludedValues, onToggleYear: toggleYear, onToggleValue: toggleValue, onResetExclusions: resetExclusions };
   useEffect(() => {
     document.title = `${study.company.ticker} · Stock Study`;
     return () => { document.title = 'Stock Search'; };
@@ -486,7 +504,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
     ...row,
     eps: normalized && row.epsSplitFactor != null && Number.isFinite(row.epsSplitFactor) && row.epsSplitFactor > 0 ? row.eps : null,
   }));
-  const latestEPS = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).filter(row => row.eps !== null).at(-1)?.eps ?? null;
+  const latestEPS = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).filter(row => row.eps !== null && !isValueExcluded(controls, 'eps', reportingYear(row, reportingYearOffset(annual)))).at(-1)?.eps ?? null;
   const highEPSForecast = fiveYearEstimate(latestEPS, forecasts.eps);
   const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);
   return <main className="study-page">
@@ -502,11 +520,11 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
     {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={onRefresh}>Retry both sources</button>}</aside>}
     {!study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>
-      <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears}/>
-      <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} excludedYears={excludedYears} forecasts={forecasts} onForecastChange={updateForecast}/>
-      <ManagementTable annual={annual}/>
+      <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
+      <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls} forecasts={forecasts} onForecastChange={updateForecast}/>
+      <ManagementTable key={`management-${study.id}`} annual={annual}/>
     </div>
-    <div id="panel-valuation" role="tabpanel" aria-labelledby="tab-valuation" hidden={tab !== 'valuation'}><ValuationPage key={`valuation-${study.id}`} study={study} annual={annual} quote={quote} highEPSForecast={highEPSForecast} epsForecastRate={forecasts.eps} onEditEPSForecast={() => { setTab('fundamentals'); window.requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Earnings per share annual forecast percentage"]')?.focus()); }}/></div>
+    <div id="panel-valuation" role="tabpanel" aria-labelledby="tab-valuation" hidden={tab !== 'valuation'}><ValuationPage key={`valuation-${study.id}`} study={study} annual={annual} quote={quote} controls={controls} highEPSForecast={highEPSForecast} epsForecastRate={forecasts.eps} onEditEPSForecast={() => { setTab('fundamentals'); window.requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Earnings per share annual forecast percentage"]')?.focus()); }}/></div>
     <footer className="study-footer"><div><strong>Sources</strong><a href={study.sources.sec.url} target="_blank" rel="noreferrer">SEC Company Facts ↗</a><span>{study.sources.sec.retrievedAt ? `Retrieved ${new Date(study.sources.sec.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><div><strong>Price history</strong><a href={study.sources.yfinance.url} target="_blank" rel="noreferrer">Yahoo Finance via yfinance ↗</a><span>{study.sources.yfinance.retrievedAt ? `Retrieved ${new Date(study.sources.yfinance.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><p>Financials cover the latest ten available full fiscal years. Prices cover the trailing decade where available and use Yahoo’s split-adjusted close, without dividend adjustment. Refresh creates a new study snapshot.</p></footer>
   </main>;
 }

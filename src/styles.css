@@ -511,3 +511,13 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .forecast-help { margin:8px 0 0; color:#7c8898; font-size:9px; line-height:1.5; }
 @media(max-width:1000px) { .forecast-layout { grid-template-columns:minmax(0,1fr) 240px; gap:12px; } .forecast-input-grid { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:700px) { .forecast-layout { grid-template-columns:minmax(0,1fr); } .forecast-section-body { padding:10px; } .forecast-assumptions { grid-template-columns:minmax(0,1fr); } }
+.table-year-toggle,.table-value-toggle { appearance:none; border:0; background:transparent; color:inherit; font:inherit; padding:2px 0; cursor:pointer; border-radius:3px; }
+.table-year-toggle { font-weight:inherit; width:100%; }
+.table-value-toggle { min-width:100%; text-align:inherit; }
+.table-year-toggle:hover,.table-value-toggle:hover:not(:disabled) { background:#e8eef4; }
+.table-year-toggle:focus-visible,.table-value-toggle:focus-visible { outline:2px solid #2874d0; outline-offset:3px; }
+.table-value-toggle.is-excluded,.table-year-toggle[aria-pressed="true"] { color:#99a2ae; }
+.table-value-toggle:disabled { cursor:default; opacity:1; }
+.table-value-toggle del,.table-year-toggle del { text-decoration-thickness:1.5px; }
+.table-exclusion-help { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:7px 10px; background:#f7f9fb; font-size:10px; color:#7b8794; }
+.table-exclusion-help button { border:1px solid #dce3eb; background:white; border-radius:4px; padding:4px 8px; font:inherit; color:#526b7a; cursor:pointer; white-space:nowrap; }
