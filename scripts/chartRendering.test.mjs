@@ -263,7 +263,11 @@ test('year exclusions update the existing chart without adding or replacing char
     await enter(forecastInput('Forecast average high P/E'), '20');
     await enter(forecastInput('Forecast average low P/E'), '10');
     await enter(forecastInput('Forecast average payout (%)'), '50');
-    await React.act(async () => valuationPanel.querySelector('input[name="forecast-low-method"][value="manual"]').click());
+    await React.act(async () => {
+      const select = [...valuationPanel.querySelectorAll('label')].find(element => element.firstChild?.textContent.trim() === 'Low-price method').querySelector('select');
+      select.value = 'manual';
+      select.dispatchEvent(new window.Event('change', { bubbles: true }));
+    });
     await enter(valuationPanel.querySelector('[aria-label="Manual low-price forecast"]'), '10');
     assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '$45.09');
     assert.equal(valuationPanel.querySelector('[data-testid="forecast-low-price"]').textContent, '$10.00');
@@ -277,6 +281,28 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.equal(valuationPanel.querySelector('[data-testid="high-eps-forecast"]').textContent, '3.48');
     assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '$69.67');
     assert.equal(forecastInput('Forecast average high P/E').value, '20');
+    const method = label => [...valuationPanel.querySelectorAll('label')].find(element => element.firstChild?.textContent.trim() === label).querySelector('select');
+    const choose = async (label, value) => React.act(async () => {
+      const select = method(label);
+      select.value = value;
+      select.dispatchEvent(new window.Event('change', { bubbles: true }));
+    });
+    await choose('High-price method', 'manual');
+    await enter(valuationPanel.querySelector('[aria-label="Manual high-price forecast"]'), '100');
+    await choose('Low-price method', 'manual');
+    await enter(valuationPanel.querySelector('[aria-label="Manual low-price forecast"]'), '20');
+    assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '$100.00');
+    assert.equal(valuationPanel.querySelector('[data-testid="forecast-low-price"]').textContent, '$20.00');
+    assert.match(valuationPanel.querySelector('.forecast-return-table thead').textContent, /My high price/);
+    await enter(valuationPanel.querySelector('[aria-label="Manual low-price forecast"]'), '110');
+    assert.equal(valuationPanel.querySelector('.forecast-zone').textContent, 'Check forecasts');
+    await choose('High-price method', 'pe');
+    assert.equal(forecastInput('Forecast average high P/E').value, '20');
+    assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '$69.67');
+    await React.act(async () => valuationPanel.querySelector('.forecast-reset').click());
+    assert.equal(method('High-price method').value, 'pe');
+    assert.equal(method('Low-price method').value, 'pe');
+    assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '—');
     assert.equal(document.querySelectorAll('.recharts-wrapper').length, 1);
     const januaryStudy = { ...annualStudy, id: 'january-year-display', quarterly: [], annual: annualStudy.annual.map(row => ({ ...row, fiscalYear: Number(row.periodEnd.slice(0, 4)), periodEnd: `${row.periodEnd.slice(0, 4)}-01-31` })) };
     await React.act(async () => { root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: januaryStudy, onBack() {}, onRefresh() {} }))); });
