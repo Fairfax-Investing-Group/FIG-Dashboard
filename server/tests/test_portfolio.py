@@ -69,18 +69,45 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(result['partners'][0]['pitches'][0]['date'], original['partners'][0]['pitches'][0]['date'])
         self.assertTrue(all(index['history'] for index in result['indexes']))
 
+    def test_beta_uses_adjusted_returns_and_cash_weighting(self):
+        histories = self.histories()
+        market, stock = 100, 100
+        benchmark, security = [], []
+        start = datetime(2026, 8, 1)
+        for index in range(75):
+            change = (.01, -.005, .002)[index % 3]
+            market *= 1 + change
+            stock *= 1 + 2 * change
+            day = (start + timedelta(days=index)).date().isoformat()
+            benchmark.append({'date': day, 'adjustedClose': market})
+            security.append({'date': day, 'adjustedClose': stock})
+        self.assertAlmostEqual(p.stock_beta(security, benchmark, '2026-10-26'), 2)
+        self.assertIsNone(p.stock_beta(security[:60], benchmark, '2026-10-26'))
+        self.assertIsNone(p.stock_beta(security, [{'date': x['date'], 'adjustedClose': 100} for x in benchmark], '2026-10-26'))
+        # Raw closing prices may differ from adjusted prices after splits/dividends.
+        for symbol, records in histories.items():
+            adjusted = benchmark if symbol == '^GSPC' else security
+            histories[symbol] = [{**records[0], **point} for point in adjusted] + records
+        result = p.calculate_portfolio(self.seed, histories, '2026-10-26')
+        self.assertTrue(all(abs(item['beta'] - 2) < 1e-10 for item in result['holdings']))
+        summary = result['summary']
+        self.assertAlmostEqual(summary['beta'], 2 * summary['holdingsValue'] / summary['portfolioValue'])
+        histories[self.seed['holdings'][0]['ticker']] = self.histories()[self.seed['holdings'][0]['ticker']]
+        result = p.calculate_portfolio(self.seed, histories, '2026-10-26')
+        self.assertIsNone(result['summary']['beta'])
+
     def test_failed_refresh_retains_persistent_snapshot_then_retries_without_duplicate_updates(self):
         now = datetime(2026, 10, 26, 20, 16, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as directory, patch.dict('os.environ', {'PORTFOLIO_CACHE': str(Path(directory) / 'portfolio.json')}):
             cached = {**self.seed, 'seedFingerprint': self.fingerprint, 'lastSuccessfulAt': '2026-10-23T20:16:00Z'}
             p.cache_path().write_text(json.dumps(cached))
             original = p.cache_path().read_bytes()
-            with patch.object(p, 'fetch_history', side_effect=ValueError('MSFT close missing')):
+            with patch.object(p, 'fetch_classification', return_value={}), patch.object(p, 'fetch_history', side_effect=ValueError('MSFT close missing')):
                 self.assertFalse(p.refresh_if_due(now))
             self.assertEqual(p.cache_path().read_bytes(), original)
             self.assertEqual(p.get_portfolio(now)['refresh']['status'], 'error')
             histories = self.histories()
-            with patch.object(p, 'fetch_history', side_effect=lambda symbol, *args: histories[symbol]) as fetch:
+            with patch.object(p, 'fetch_classification', return_value={'sector': 'Technology', 'marketCap': 250e9}), patch.object(p, 'fetch_history', side_effect=lambda symbol, *args: histories[symbol]) as fetch:
                 self.assertFalse(p.refresh_if_due(now + timedelta(minutes=1)))
                 fetch.assert_not_called()
                 self.assertTrue(p.refresh_if_due(now + timedelta(minutes=6)))
@@ -90,4 +117,6 @@ class PortfolioTests(unittest.TestCase):
             saved = p.get_portfolio(now + timedelta(minutes=7))
             self.assertEqual(saved['asOf'], '2026-10-26')
             self.assertEqual(saved['refresh']['status'], 'ready')
+            self.assertEqual(saved['holdings'][0]['sector'], 'Technology')
+            self.assertEqual(saved['holdings'][0]['marketCap'], 250e9)
             self.assertFalse(p.cache_path().with_suffix('.tmp').exists())

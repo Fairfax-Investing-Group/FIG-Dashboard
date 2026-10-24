@@ -312,7 +312,7 @@ footer a:hover { text-decoration: underline; }
   .company-ticker { font-size:34px; }
   .company-identity h1 { font-size:19px; }
   .regular-market-quote>strong { font-size:29px; }
-  .company-statistics { grid-column:1/-1; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; border-top:1px solid #edf0f3; padding-top:6px; }
+  .company-statistics { grid-column:1/-1; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; border-top:1px solid #edf0f3; padding-top:6px; }
   .company-statistics>div { flex-direction:column; align-items:flex-start; gap:2px; padding:0; border-bottom:0; }
   .company-statistics dt { font-size:9px; }
 }
@@ -618,7 +618,7 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-heading { display:flex; align-items:center; justify-content:flex-end; gap:20px; margin-bottom:16px; }
 .portfolio-asof { display:flex; flex-direction:column; align-items:flex-end; gap:5px; color:#7a8797; font-size:10px; }
 .portfolio-asof strong { font-size:9px; font-weight:500; color:var(--navy-soft); }
-.portfolio-summary { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); overflow:hidden; border:1px solid var(--ui-border); border-radius:6px; background:#fff; margin-bottom:10px; }
+.portfolio-summary { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)) repeat(2,minmax(68px,.6fr)); overflow:hidden; border:1px solid var(--ui-border); border-radius:6px; background:#fff; margin-bottom:10px; }
 .portfolio-summary-item { display:flex; flex-direction:column; justify-content:space-between; gap:6px; padding:9px 12px; min-width:0; border-right:1px solid var(--ui-border); }
 .portfolio-summary-item:last-child { border:0; }
 .portfolio-summary-item>span { color:#6e7d8e; font-size:9px; line-height:1.5; }
@@ -648,7 +648,7 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-table tfoot th,.portfolio-table tfoot td { background:#edf2f7; color:var(--navy-strong); font-weight:600; border-bottom:0; }
 .portfolio-table tfoot td.portfolio-positive { color:#287b53; }
 .portfolio-table tfoot td.portfolio-negative { color:#b54850; }
-.portfolio-table .portfolio-company-name { max-width:175px; white-space:normal; font-size:10px; line-height:1.4; }
+.portfolio-table .portfolio-company-name { white-space:nowrap; font-size:10px; line-height:1.4; }
 .portfolio-ticker { padding:2px 0; border:0; background:transparent; color:var(--navy); font-size:10px; font-weight:700; text-decoration:underline; text-underline-offset:3px; }
 .portfolio-purchase-date { min-width:94px; }
 .portfolio-purchase-date small { display:block; margin-top:2px; color:#8996a5; font-size:8px; }
@@ -764,3 +764,97 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 
 .home-methodology { display:flex; flex-direction:column; }
 .home-methodology ol { flex-shrink:0; margin-block:auto; }
+
+.portfolio-holdings .portfolio-company-name { max-width:none; }
+.portfolio-holdings .portfolio-history-cell { width:140px; min-width:140px; }
+.portfolio-holdings .portfolio-history-cell .portfolio-sparkline { width:140px; margin:0; }
+@media(max-width:1200px) { .portfolio-summary { grid-template-columns:repeat(5,minmax(0,1fr)); } .portfolio-summary-item { border-right:1px solid var(--ui-border); border-bottom:1px solid var(--ui-border); } .portfolio-summary-item:nth-child(4) { border-right:1px solid var(--ui-border); } .portfolio-summary-item:nth-child(5n) { border-right:0; } .portfolio-summary-item:nth-last-child(-n+5) { border-bottom:0; } }
+@media(max-width:600px) { .portfolio-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .portfolio-summary-item:nth-child(n) { border-right:1px solid var(--ui-border); border-bottom:1px solid var(--ui-border); } .portfolio-summary-item:nth-child(even) { border-right:0; } .portfolio-summary-item:last-child { grid-column:auto; border:0; } }
+
+.portfolio-charts { grid-template-columns:minmax(0,1.4fr) minmax(0,1.15fr) minmax(0,1fr); align-items:stretch; }
+.portfolio-charts>section { display:flex; flex-direction:column; }
+.portfolio-charts .portfolio-chart { flex:1; min-height:205px; }
+.portfolio-allocation-pies { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:8px 12px 4px; flex:1; }
+.portfolio-allocation-donut { min-width:0; }
+.portfolio-allocation-donut h4 { margin:0; text-align:center; color:#325779; font-size:10px; font-weight:600; }
+.portfolio-allocation-donut svg { display:block; width:100%; height:112px; margin:0 auto; }
+.portfolio-donut-center { fill:#234d76; font-size:18px; font-weight:600; }
+.portfolio-donut-caption { fill:#7a8da1; font-size:8px; }
+.portfolio-allocation-donut ul { list-style:none; margin:0; padding:0; }
+.portfolio-allocation-donut li { display:flex; gap:5px; align-items:center; padding:2px 0; font-size:8px; color:#62768a; }
+.portfolio-allocation-donut li i { width:6px; height:6px; border-radius:2px; flex-shrink:0; }
+.portfolio-allocation-donut li span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.portfolio-allocation-donut li strong { margin-left:auto; font-weight:500; color:#234d76; white-space:nowrap; }
+.portfolio-allocation-note { margin:0; padding:4px 10px 7px; text-align:center; color:#7b8b9c; font-size:8px; line-height:1.4; }
+.portfolio-heatmap-body { display:flex; flex:1; flex-direction:column; padding:10px 10px 0; }
+.portfolio-heatmap-body>svg { width:100%; height:190px; flex:1; min-height:160px; }
+.portfolio-heatmap-legend { display:flex; justify-content:center; align-items:center; gap:6px; margin-top:7px; font-size:8px; color:#6b8196; }
+.portfolio-heatmap-legend i { width:90px; height:5px; border-radius:2px; background:linear-gradient(90deg,#cadbea,#7ea8cb,#477eac,#204e7c); }
+@media(max-width:1200px) { .portfolio-charts { grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); } .portfolio-charts>section:first-child { grid-column:1 / -1; } }
+@media(max-width:600px) { .portfolio-charts { grid-template-columns:minmax(0,1fr); } .portfolio-allocation-donut svg { height:125px; } .portfolio-allocation-donut li { font-size:10px; } }
+
+.portfolio-charts { grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr); }
+.portfolio-allocation-donut { position:relative; }
+.portfolio-allocation-donut svg { height:196px; overflow:visible; }
+.portfolio-pie-slice { cursor:default; outline:none; }
+.portfolio-pie-slice:focus-visible path,.portfolio-pie-slice:focus-visible circle { stroke:#97b8d4; stroke-width:3px; }
+.portfolio-allocation-tooltip,.portfolio-heatmap-tooltip { position:absolute; z-index:3; padding:8px 10px; border:1px solid #8caac5; border-radius:4px; background:#f8fbff; box-shadow:0 3px 12px #193f6825; color:#234d76; font-size:10px; line-height:1.5; pointer-events:none; }
+.portfolio-allocation-tooltip { top:25px; left:4px; right:4px; overflow-wrap:anywhere; }
+.portfolio-allocation-tooltip ul { margin:4px 0 0; padding:0; list-style:none; }
+.portfolio-allocation-tooltip li { display:block; padding:1px 0; font-size:9px; }
+.portfolio-heatmap-body { position:relative; }
+.portfolio-heatmap-tooltip { top:14px; left:14px; display:flex; flex-direction:column; }
+.home-company-search h2 { font-size:12px; line-height:1.2; font-weight:600; letter-spacing:normal; }
+.home-company-search .search-field { background:#edf0f4; border-color:#b8c3cf; border-radius:4px; }
+.home-search-control { position:relative; min-width:0; }
+.home-company-search #search-results { top:calc(100% + 4px); left:0; right:0; background:#edf0f4; max-height:min(65svh,520px); }
+.home-company-search .company-result[aria-selected=true] { background:#dce7f1; }
+.home-company-search .company-info strong { font-size:10px; }
+.home-company-search .company-result { min-height:38px; }
+@media(max-width:1000px) { .portfolio-charts { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } .portfolio-charts>section:first-child { grid-column:1 / -1; } }
+@media(min-width:1001px) { .portfolio-charts>section:first-child { grid-column:auto; } }
+@media(max-width:600px) { .portfolio-charts { grid-template-columns:minmax(0,1fr); } }
+
+.portfolio-return-summary { display:flex; justify-content:center; flex-wrap:wrap; gap:6px 22px; padding:8px 12px 0; font-size:10px; font-weight:600; font-variant-numeric:tabular-nums; }
+.portfolio-return-summary span { display:inline-flex; align-items:center; gap:6px; color:#234d76; }
+.portfolio-return-summary span::before { content:''; width:15px; height:2px; background:currentColor; }
+.portfolio-return-summary span:last-child { color:#518168; }
+.portfolio-diversification { position:relative; }
+.portfolio-allocation-donut { position:static; }
+.portfolio-allocation-tooltip,.portfolio-heatmap-tooltip { right:auto; width:max-content; max-width:144px; padding:5px 7px; background:rgba(244,249,255,.78); border:1px solid rgba(106,143,177,.55); box-shadow:0 2px 7px #193f6818; backdrop-filter:blur(2px); font-size:9px; line-height:1.35; display:flex; flex-direction:column; gap:2px; }
+.portfolio-allocation-tooltip span { font-size:8px; color:#49647e; }
+.home-company-search h2,.home-login-form h2 { margin:0; font-size:12px; line-height:1.2; font-weight:600; letter-spacing:normal; }
+.home-company-search { gap:4px; }
+.home-search-help { margin:0; font-size:9px; line-height:1.4; }
+@media(min-width:801px) { .home-account { align-items:start; } .home-company-search { justify-content:flex-start; padding-top:15px; } }
+
+.portfolio-top-summary { display:grid; grid-template-columns:minmax(0,1fr) 338px; gap:10px; margin-bottom:10px; }
+.portfolio-top-summary .portfolio-summary { grid-template-columns:repeat(8,minmax(0,1fr)); margin-bottom:0; }
+.portfolio-top-summary .portfolio-summary-item { justify-content:center; padding:9px 8px; border-bottom:0; border-right:1px solid var(--ui-border); }
+.portfolio-top-summary .portfolio-summary-item:last-child { border:0; }
+.portfolio-risk-box { padding:7px 10px; border:1px solid #ccd8e4; border-radius:6px; background:#f4f7fb; min-width:0; }
+.portfolio-risk-heading { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; }
+.portfolio-risk-heading h3 { margin:0; font-size:9px; font-weight:600; color:#234d76; }
+.portfolio-risk-heading span { font-size:7px; color:#7b8b9c; white-space:nowrap; }
+.portfolio-risk-box dl { display:grid; grid-template-columns:1fr 1fr; column-gap:15px; margin:0; }
+.portfolio-risk-box dl>div { display:flex; justify-content:space-between; align-items:baseline; gap:5px; padding:2px 0; border-top:1px solid #e0e7ef; }
+.portfolio-risk-box dt { font-size:8px; color:#64788d; }
+.portfolio-risk-box dd { margin:0; font-size:10px; font-weight:600; color:#234d76; white-space:nowrap; font-variant-numeric:tabular-nums; }
+@media(max-width:1450px) { .portfolio-top-summary .portfolio-summary-item>strong { font-size:14px; } }
+@media(max-width:1200px) { .portfolio-top-summary { grid-template-columns:minmax(0,1fr) 310px; } .portfolio-top-summary .portfolio-summary { grid-template-columns:repeat(4,minmax(0,1fr)); } .portfolio-top-summary .portfolio-summary-item:nth-child(4n) { border-right:0; } .portfolio-top-summary .portfolio-summary-item:nth-child(-n+4) { border-bottom:1px solid var(--ui-border); } }
+@media(max-width:800px) { .portfolio-top-summary { grid-template-columns:minmax(0,1fr); } .portfolio-risk-box dl { column-gap:22px; } }
+@media(max-width:480px) { .portfolio-top-summary .portfolio-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .portfolio-top-summary .portfolio-summary-item:nth-child(even) { border-right:0; } .portfolio-top-summary .portfolio-summary-item:nth-child(-n+6) { border-bottom:1px solid var(--ui-border); } }
+
+.portfolio-performance-status { justify-content:flex-start; padding:8px 0 0; }
+.portfolio-performance-status .portfolio-asof { justify-content:flex-start; text-align:left; font-size:8px; gap:3px 10px; }
+.portfolio-performance-status .portfolio-asof strong,.portfolio-performance-status .portfolio-refresh-status { font-size:8px; }
+.portfolio-charts .portfolio-chart { padding-top:2px; padding-bottom:0; }
+
+.portfolio-top-summary { grid-template-columns:minmax(0,1fr) 480px; }
+.portfolio-top-summary .portfolio-summary-item { align-items:center; text-align:center; }
+.portfolio-risk-box dl { grid-template-columns:repeat(3,minmax(0,1fr)); column-gap:14px; }
+.portfolio-risk-box dt { font-size:8.5px; }
+.portfolio-risk-box dl>div { padding:2px 0; }
+@media(max-width:1200px) { .portfolio-top-summary { grid-template-columns:minmax(0,1fr) 450px; } }
+@media(max-width:900px) { .portfolio-top-summary { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:550px) { .portfolio-risk-box dl { grid-template-columns:repeat(2,minmax(0,1fr)); } .portfolio-period { flex-wrap:wrap; justify-content:flex-end; } [aria-labelledby="portfolio-performance-title"] .portfolio-panel-heading { align-items:flex-start; } }
