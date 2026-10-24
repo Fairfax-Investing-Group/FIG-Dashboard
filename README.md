@@ -22,7 +22,20 @@ export SEC_USER_AGENT="StockStudy your-contact@example.com"
 npm run dev
 ```
 
-The default identifies this local research app. SEC may block requests without adequate contact identification or rate-limit an IP; the UI reports upstream failures and lets you retry. No API keys are required. Set `API_PORT` to use another backend port; the Vite proxy uses the same value.
+The default identifies this local research app. SEC may block requests without adequate contact identification or rate-limit an IP; the UI reports upstream failures and lets you retry. No API keys are required for SEC/Yahoo financial requests. Supabase login uses the public project settings described below. Set `API_PORT` to use another backend port; the Vite proxy uses the same value.
+
+## Supabase login and study-input infrastructure
+
+The homepage and `#/login` support Supabase email/password authentication,
+session restoration, and logout. Set `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local` (see `.env.example`). Apply
+`supabase/migrations/202610240001_user_studies.sql` in your project's SQL Editor.
+
+Cloud storage contains only user-entered overrides, selections, notes, company
+identifiers and ownership metadata. Provider data stays in the local research
+pipeline. The typed repository and per-user RLS policies are ready for future
+Save/Open integration; no autosave or cloud study UI is enabled yet.
+See [Supabase setup and storage contract](docs/supabase.md).
 
 ## What a study shows
 

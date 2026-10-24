@@ -1,3 +1,4 @@
+import { AuthProvider } from './auth/AuthProvider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
 import LoginPage from './LoginPage';
@@ -20,6 +21,10 @@ async function readResponse(response: Response): Promise<StudyDocument> {
 }
 
 export default function App() {
+  return <AuthProvider><AppContent/></AuthProvider>;
+}
+
+function AppContent() {
   const [route, setRoute] = useState(readRoute);
   const [studyDocument, setStudyDocument] = useState<StudyDocument | null>(null);
   const study = useMemo(() => studyDocument?.SchemaVersion === 1 ? studyView(studyDocument) : null, [studyDocument, studyView]);

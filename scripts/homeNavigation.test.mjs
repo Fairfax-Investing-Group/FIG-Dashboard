@@ -160,8 +160,26 @@ test('home company search selects the correct issuer and login opens without a s
       await new Promise(resolve => setTimeout(resolve, 70));
     });
     assert.deepEqual(preloads, [...topFive, 'MSFT', 'AAPL'], 'Hover and keyboard highlighting do not start extra preloads');
-    await React.act(async () => document.querySelector('.company-result').click());
+    await React.act(async () => input.focus());
+    const mouseDown = new window.MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+    await React.act(async () => {
+      // Model Safari's mouse focus default: blur to no target if not prevented.
+      apple.dispatchEvent(mouseDown);
+      if (!mouseDown.defaultPrevented) input.blur();
+    });
+    assert.equal(document.getElementById('search-results').hidden, false, 'Results must remain visible between mouse down and click');
+    assert.equal(document.activeElement, input, 'Mouse selection preserves combobox focus');
+    await React.act(async () => apple.click());
     assert.equal(selected.ticker, 'AAPL');
+    assert.equal(document.getElementById('search-results').hidden, true);
+    // Genuine focus movement outside the search should still close the popup.
+    await React.act(async () => {
+      input.focus();
+      input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    });
+    assert.equal(document.getElementById('search-results').hidden, false);
+    await React.act(async () => document.getElementById('home-login-email').focus());
+    assert.equal(document.getElementById('search-results').hidden, true);
     window.location.hash = '/login';
     await React.act(async () => root.render(React.createElement(App)));
     assert.equal(document.getElementById('login-title').textContent, 'Log in');

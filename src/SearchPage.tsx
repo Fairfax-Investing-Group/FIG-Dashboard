@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import LoginForm from './auth/LoginForm';
 import logo from './assets/fairfax-logo.png';
 const PortfolioDashboard = lazy(() => import('./PortfolioDashboard'));
 
@@ -71,16 +72,7 @@ export default function SearchPage({ onSelect, onPreload }: { onSelect: (company
       <header className="home-topbar">
         <div className="home-account">
           <a className="home-brand" href="#" aria-label="Fairfax Investing Group home"><img className="home-brand-logo" src={logo} alt="Fairfax Investing Group"/></a>
-          <form className="home-login-form" aria-labelledby="home-login-title" onSubmit={event => event.preventDefault()}>
-            <h2 id="home-login-title">Investor login</h2>
-            <div className="home-login-fields">
-              <label className="sr-only" htmlFor="home-login-email">Email address</label>
-              <input id="home-login-email" type="email" name="email" autoComplete="username" placeholder="Email" required/>
-              <label className="sr-only" htmlFor="home-login-password">Password</label>
-              <input id="home-login-password" type="password" name="password" autoComplete="current-password" placeholder="Password" required/>
-            </div>
-            <div className="home-login-actions"><button type="submit" disabled aria-describedby="home-login-availability">Investor login</button><small id="home-login-availability">Sign-in coming soon</small></div>
-          </form>
+          <LoginForm compact/>
         </div>
         <section className="home-methodology" aria-label="Welcome and investment methodology">
           <ol>
@@ -131,7 +123,11 @@ export default function SearchPage({ onSelect, onPreload }: { onSelect: (company
 
         {status === 'ready' && search && matches.length > 0 && <ul className="results" role="listbox" aria-label="Closest matching companies">
           {matches.map((company, index) => <li key={`${company.cik}-${company.ticker}`}>
-            <button id={`company-option-${index}`} role="option" aria-selected={activeMatch === index} className="company-result" onMouseEnter={() => setActiveMatch(index)} onFocus={() => setActiveMatch(index)} onClick={() => { cancelPreload(); onSelect(company); setSearchOpen(false); }} aria-label={`Create stock study for ${company.name}, ${company.ticker}`}>
+            <button id={`company-option-${index}`} role="option" aria-selected={activeMatch === index} className="company-result" type="button" onMouseDown={event => {
+              // Keep the combobox focused until click. Safari does not focus clicked
+              // buttons, so input blur would otherwise hide the result before click.
+              if (event.button === 0) event.preventDefault();
+            }} onMouseEnter={() => setActiveMatch(index)} onFocus={() => setActiveMatch(index)} onClick={() => { cancelPreload(); onSelect(company); setSearchOpen(false); }} aria-label={`Create stock study for ${company.name}, ${company.ticker}`}>
               <span className="company-info"><strong>{company.name}</strong><span>{company.ticker}<span className="separator">·</span>{company.exchange || 'Exchange unavailable'}</span></span>
               <span className="result-action">Create study <span aria-hidden="true">→</span></span>
             </button>
