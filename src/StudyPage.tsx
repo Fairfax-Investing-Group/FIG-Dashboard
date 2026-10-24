@@ -12,6 +12,7 @@ import { ExclusionYear, ExclusionValue, ExclusionHelp, isValueExcluded, metricEx
 
 import { StudyInputsProvider, useStudyInputs, useStudyInputSection, useStudyReadOnly, inputNumber } from './StudyInputsContext';
 import type { SavedStudy } from './lib/studyInputs';
+import { apiUrl } from './lib/api';
 import SaveStudy from './SaveStudy';
 
 const metrics: { key: FinancialChartKey; title: string; color: string; note: string }[] = [
@@ -438,7 +439,7 @@ function useMarketQuote(ticker: string) {
       controller?.abort();
       controller = new AbortController();
       try {
-        const response = await fetch(`/api/quotes/${encodeURIComponent(ticker)}`, { signal: controller.signal });
+        const response = await fetch(apiUrl(`/api/quotes/${encodeURIComponent(ticker)}`), { signal: controller.signal });
         if (!response.ok) throw new Error('Quote unavailable');
         const value = await response.json() as MarketQuote;
         if (!('regular' in value) || !('postMarket' in value)) throw new Error('Invalid quote');
@@ -500,13 +501,14 @@ const emptyValues: string[] = [];
 
 type StudyPageProps = {
   study: Study; onBack: () => void; onRefresh: (savedInputs?: SavedStudy) => void;
+  staticSnapshot?: boolean;
   fundamentalsStatus?: 'idle' | 'loading' | 'error'; fundamentalsError?: string | null; onRetryFundamentals?: () => void;
   onFundamentalsReady?: (id: string) => void; detailsStatus?: 'idle' | 'loading' | 'error'; onRetryDetails?: () => void;
 } & { initialSavedStudy?: SavedStudy; active?: boolean };
 export default function StudyPage(props: StudyPageProps) {
   return <StudyInputsProvider initial={props.initialSavedStudy}><StudyPageContent {...props}/></StudyInputsProvider>;
 }
-function StudyPageContent({ study, onBack, onRefresh, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails, fundamentalsStatus = 'idle', fundamentalsError, onRetryFundamentals, active = true }: StudyPageProps) {
+function StudyPageContent({ study, onBack, onRefresh, staticSnapshot = false, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails, fundamentalsStatus = 'idle', fundamentalsError, onRetryFundamentals, active = true }: StudyPageProps) {
   useEffect(() => { onFundamentalsReady?.(study.id); }, [study.id, onFundamentalsReady]);
   const readOnly = useStudyReadOnly();
   const pending = fundamentalsStatus !== 'idle';
@@ -564,12 +566,12 @@ function StudyPageContent({ study, onBack, onRefresh, onFundamentalsReady, detai
         setTab(next);
         document.getElementById(`tab-${next}`)?.focus();
       }
-    }}>{item.label}</button>)}</div><div className="study-header-actions">{pending ? <span className="export-button" aria-disabled="true">Export JSON ↓</span> : <a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a>}<button className="primary-button" disabled={fundamentalsStatus === 'loading'} onClick={refresh}>↻ Refresh study</button><SaveStudy study={study}/></div></nav>
+    }}>{item.label}</button>)}</div><div className="study-header-actions">{pending ? <span className="export-button" aria-disabled="true">Export JSON ↓</span> : <a className="export-button" href={staticSnapshot ? `${import.meta.env.BASE_URL}studies/${study.company.ticker.replace('.', '-')}.json` : apiUrl(`/api/studies/${study.id}`)} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a>}{staticSnapshot && <span className="snapshot-note" title="GitHub Pages serves a scheduled snapshot. Live refresh requires a study API.">GitHub snapshot</span>}<button className="primary-button" disabled={staticSnapshot || fundamentalsStatus === 'loading'} title={staticSnapshot ? 'Live refresh requires a study API.' : undefined} onClick={refresh}>↻ Refresh study</button><SaveStudy study={study}/></div></nav>
     <CompanyHeader study={study} quote={quote} quoteStatus={quoteStatus} pending={pending}/>
     {fundamentalsStatus === 'error' && <aside className="study-background-status" role="alert">{fundamentalsError ?? 'Financial data could not be loaded.'} <button type="button" className="text-button" onClick={onRetryFundamentals}>Retry</button></aside>}
     {detailsStatus === 'error' && <aside className="study-background-status" role="alert">Additional study data could not be loaded. Your fundamentals remain available. <button type="button" className="text-button" onClick={onRetryDetails}>Retry</button></aside>}
-    {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={refresh}>Retry both sources</button>}</aside>}
-    {!pending && !study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={refresh}>Refresh study to normalize EPS</button>.</aside>}
+    {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && !staticSnapshot && <button className="text-button" onClick={refresh}>Retry both sources</button>}</aside>}
+    {!pending && !study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study.{staticSnapshot ? ' A live refresh requires a study API.' : <> <button className="text-button" onClick={refresh}>Refresh study to normalize EPS</button>.</>}</aside>}
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>
       <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} pending={pending} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
       <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls} pending={pending} forecasts={forecasts} onForecastChange={updateForecast}/>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { apiUrl } from './lib/api';
 
 type Article = { id: string; title: string; url: string; publisher: string; publishedAt: string; summary: string; thumbnail?: string | null };
 type NewsFeed = { articles: Article[]; retrievedAt: string; nextCount: number | null };
@@ -26,7 +27,7 @@ export default function NewsPage({ ticker, active }: { ticker: string; active: b
     setStatus('loading');
     async function load() {
       try {
-        const response = await fetch(`/api/news/${encodeURIComponent(ticker)}?count=${count}`, { signal: controller.signal });
+        const response = await fetch(apiUrl(`/api/news/${encodeURIComponent(ticker)}?count=${count}`), { signal: controller.signal });
         if (!response.ok) throw new Error('News unavailable');
         const result = await response.json() as NewsFeed;
         if (!Array.isArray(result.articles)) throw new Error('Invalid news response');

@@ -87,6 +87,7 @@ export type StudyDocument = {
   ComputedValues: { GrowthMethod: 'log-linear-regression'; SalesGrowthRate: number | null; EPSGrowthRate: number | null; PTPGrowthRate: number | null };
   Metadata: {
     DataStage?: 'fundamentals' | 'complete';
+    StaticSnapshot?: boolean;
     PriceInterval?: '1d' | '1wk';
     FinancialCurrency: string | null; PriceCurrency: string | null;
     Sources: Record<'SEC' | 'YahooFinance', { Status: 'ok' | 'error' | 'loading'; URL: string; RetrievedAt: string | null; Error: string | null }>;

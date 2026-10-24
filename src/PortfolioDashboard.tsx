@@ -3,6 +3,7 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import initialPortfolio from './data/portfolio.json';
 import PortfolioAllocation from './PortfolioAllocation';
 import { portfolioDayChange, portfolioSharpe, portfolioRiskMetrics } from './portfolioMath';
+import { apiUrl } from './lib/api';
 
 type Portfolio = Omit<typeof initialPortfolio, 'holdings' | 'summary'> & {
   holdings: (typeof initialPortfolio.holdings[number] & { beta?: number | null; alpha?: number | null; standardDeviation?: number | null; trailingPE?: number | null; forwardPE?: number | null; pegRatio?: number | null; freeCashFlowYield?: number | null; sector?: string | null; marketCap?: number | null })[];
@@ -76,7 +77,7 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
         let data: Portfolio | null = null;
         for (const source of ['/api/portfolio', '/portfolio-current.json']) {
           try {
-            const response = await fetch(source, { signal: controller.signal });
+            const response = await fetch(source.startsWith('/api/') ? apiUrl(source) : source, { signal: controller.signal });
             if (!response.ok) continue;
             const candidate = await response.json() as Portfolio;
             if (!Array.isArray(candidate.holdings) || !Array.isArray(candidate.performance) || typeof candidate.summary?.portfolioValue !== 'number') continue;

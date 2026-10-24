@@ -19,6 +19,8 @@ from server.portfolio import get_portfolio, start_portfolio_scheduler
 
 STUDY_SLOTS = threading.BoundedSemaphore(4)
 COMPLETION_SLOTS = threading.BoundedSemaphore(2)
+API_ORIGINS = {origin.strip().rstrip('/') for origin in os.environ.get(
+    'CORS_ORIGINS', 'https://research.fairfaxinvestinggroup.com').split(',') if origin.strip()}
 
 
 def accepts_gzip(header):
@@ -36,6 +38,26 @@ def accepts_gzip(header):
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT / 'dist'), **kwargs)
+
+    def end_headers(self):
+        if urlparse(self.path).path.startswith('/api/'):
+            origin = self.headers.get('Origin', '').rstrip('/')
+            if origin and origin in API_ORIGINS:
+                self.send_header('Access-Control-Allow-Origin', origin)
+                self.send_header('Vary', 'Origin')
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        if not urlparse(self.path).path.startswith('/api/'):
+            return self.send_error(404)
+        origin = self.headers.get('Origin', '').rstrip('/')
+        if not origin or origin not in API_ORIGINS:
+            return self.json_response(403, {'error': 'Origin is not allowed.'})
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept')
+        self.send_header('Access-Control-Max-Age', '600')
+        self.end_headers()
 
     def json_response(self, status, data):
         body = json.dumps(data, allow_nan=False, separators=(',', ':')).encode()
@@ -205,11 +227,12 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('API_PORT', '8000'))
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    port = int(os.environ.get('PORT', os.environ.get('API_PORT', '8000')))
+    host = os.environ.get('HOST', '127.0.0.1')
+    server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     portfolio_scheduler = start_portfolio_scheduler()
-    print(f'Stock study API: http://127.0.0.1:{port}', flush=True)
+    print(f'Stock study API: http://{host}:{port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

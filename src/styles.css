@@ -245,6 +245,7 @@ footer a:hover { text-decoration: underline; }
 @media(max-width:640px) { .fundamentals-title h2 { font-size:14px; } .fundamentals-title>span { display:none; } .fundamentals .financial-table-scroll tbody th { min-width:166px; } }
 
 .study-header-actions { display:flex; align-items:center; gap:10px; }
+.snapshot-note { color:var(--muted, #64748b); font-size:11px; white-space:nowrap; }
 .export-button { display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--ui-border); border-radius:7px; padding:11px 14px; background:white; color:var(--navy-soft); font-size:12px; text-decoration:none; white-space:nowrap; }
 .export-button:hover { background:var(--ui-hover); border-color:#a9b8ca; }
 @media(max-width:800px) { .study-header-actions { flex-wrap:wrap; justify-content:flex-end; } .export-button { padding:9px 11px; font-size:11px; } }

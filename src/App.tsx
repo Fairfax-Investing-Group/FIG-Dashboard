@@ -9,6 +9,8 @@ import type { SavedStudy } from './lib/studyInputs';
 import { StudyCache } from './studyCache';
 import { readStudyStream } from './studyStream';
 import { studyView } from './studyDocument';
+import { apiUrl } from './lib/api';
+import { loadStaticStudy } from './lib/staticStudy';
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
 
@@ -64,7 +66,7 @@ function AppContent() {
     const group = preloadGroup.current;
     if (!group || !active || readyStudyId !== active.id) return;
     preloadGroup.current = null;
-    void fetch('/api/studies/preload/clear', {
+    void fetch(apiUrl('/api/studies/preload/clear'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preloadGroup: group, ticker: active.company.ticker, cik: active.company.cik }),
     }).catch(() => { /* Expiry still clears unused preloads if the server is unreachable. */ });
@@ -99,10 +101,23 @@ function AppContent() {
     setLoading(true);
     setError(null);
     setPendingView(previous => previous?.id === match[1] ? previous : unknownPendingStudy(match[1]));
-    fetch(`/api/studies/${match[1]}?view=study`, { signal: controller.signal })
+    fetch(apiUrl(`/api/studies/${match[1]}?view=study`), { signal: controller.signal })
       .then(readResponse)
       .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyView(data).company); setStudyDocument(data); setPendingView(null); })
-      .catch(error => { if (!controller.signal.aborted && error.name !== 'AbortError') setError(error.message); })
+      .catch(async error => {
+        if (controller.signal.aborted || error.name === 'AbortError') return;
+        try {
+          const data = await loadStaticStudy(match[1], controller.signal);
+          if (controller.signal.aborted) return;
+          cache.current.set(data.Study.StudyID, data);
+          rememberStudyCompany(data.Study.StudyID, studyView(data).company);
+          setStudyDocument(data);
+          setPendingView(null);
+        } catch (staticError) {
+          if (controller.signal.aborted || (staticError instanceof Error && staticError.name === 'AbortError')) return;
+          setError(staticError instanceof Error ? staticError.message : error.message);
+        }
+      })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [route, loadRetry]);
@@ -115,7 +130,7 @@ function AppContent() {
     if (!studyId || readyStudyId !== studyId || dataStage !== 'fundamentals' || loading || route !== `/study/${studyId}`) return;
     const controller = new AbortController();
     setDetailsStatus('loading');
-    fetch(`/api/studies/${studyId}/complete?view=study`, {
+    fetch(apiUrl(`/api/studies/${studyId}/complete?view=study`), {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: '{}', signal: controller.signal,
     }).then(response => readStudyStream(response, data => {
       if (!controller.signal.aborted && readRoute() === `/study/${studyId}`) {
@@ -136,7 +151,7 @@ function AppContent() {
   const preloadStudy = useCallback((company: Company, priority = 0): Promise<boolean> => {
     // Scope speculative work to this search so opening a study can discard it.
     preloadGroup.current ??= crypto.randomUUID();
-    return fetch('/api/studies/preload', {
+    return fetch(apiUrl('/api/studies/preload'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ticker: company.ticker, cik: company.cik, preloadGroup: preloadGroup.current, priority }),
     }).then(response => response.ok).catch(() => false);
@@ -162,14 +177,20 @@ function AppContent() {
     setError(null);
     setLoading(true);
     try {
-      const data = await fetch('/api/studies?stage=fundamentals', {
+      let data: StudyDocument;
+      try {
+        data = await fetch(apiUrl('/api/studies?stage=fundamentals'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
         body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }),
         signal: controller.signal,
-      }).then(response => readStudyStream(response, document => {
+        }).then(response => readStudyStream(response, document => {
         if (!controller.signal.aborted) setPendingView(studyView(document));
-      }, readResponse));
+        }, readResponse));
+      } catch (apiError) {
+        if (controller.signal.aborted || (apiError instanceof Error && apiError.name === 'AbortError')) throw apiError;
+        data = await loadStaticStudy(company.ticker, controller.signal);
+      }
       if (controller.signal.aborted) return;
       cache.current.set(data.Study.StudyID, data);
       setStudyDocument(data);
@@ -204,6 +225,7 @@ function AppContent() {
   {pageStudies.map(pageStudy => <div key={pageStudy.id} hidden={!showingStudy} inert={!showingStudy}>
   <StudyPage
     study={pageStudy} active={showingStudy} initialSavedStudy={restoredInputs?.id === pageStudy.id ? restoredInputs.saved : undefined} onBack={backToSearch}
+    staticSnapshot={studyDocument?.Metadata.StaticSnapshot}
     onRefresh={saved => createStudy(pageStudy.company, undefined, saved)} onFundamentalsReady={showingStudy ? fundamentalsReady : undefined}
     fundamentalsStatus={!showingStudy || pendingView ? error ? 'error' : 'loading' : 'idle'}
     fundamentalsError={error}
