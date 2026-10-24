@@ -258,7 +258,9 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
   });
   const isolatedPoints = visible.length === 1 ? originalSpaced.filter(metric => metric.key === visible[0].key).flatMap(metric => metric.data.map(point => point[metric.key]).filter((value): value is number => value != null)) : [];
   const spaced = originalSpaced.map(metric => ({ ...metric,
-    data: metric.data.map(point => ({ ...point, [metric.key]: point[metric.key] == null || (metric.key !== 'close' && excludedYears.includes(new Date(point.timestamp).getUTCFullYear())) ? null : point[metric.key]! + (offsets[metric.key] ?? 0) })),
+    // Remove excluded observations rather than leaving null placeholders, so
+    // both the rendered line and hover geometry connect their surviving neighbors.
+    data: metric.data.filter(point => metric.key === 'close' || !excludedYears.includes(new Date(point.timestamp).getUTCFullYear())).map(point => ({ ...point, [metric.key]: point[metric.key] == null ? null : point[metric.key]! + (offsets[metric.key] ?? 0) })),
     regressionData: metric.regressionData.map(point => ({ ...point, [metric.key]: point[metric.key]! + (offsets[metric.key] ?? 0) })),
   }));
   const hoverLines: HoverLine[] = visibleLines.map(line => {

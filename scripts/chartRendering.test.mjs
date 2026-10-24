@@ -128,8 +128,18 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.deepEqual([...document.querySelectorAll('[aria-labelledby="financial-table-title"] tbody .calculated-column')].map(cell => cell.textContent), originalGrowth);
     const middleYear = document.querySelector('.year-tick[aria-label*="2018"]');
     await React.act(async () => { middleYear.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
-    const gappedPath = chart.querySelector('.draggable-series-sales path.recharts-line-curve[stroke-width="1.5"]').getAttribute('d');
-    assert.equal((gappedPath.match(/M/g) || []).length, 2, 'An excluded interior year breaks the actual line into separate segments');
+    for (const key of financialKeys) {
+      const connectedPath = chart.querySelector(`.draggable-series-${key} path.recharts-line-curve[stroke-width="1.5"]`).getAttribute('d');
+      assert.equal((connectedPath.match(/M/g) || []).length, 1, 'Excluding an interior year keeps a single connected actual line');
+      assert.equal((connectedPath.match(/L/g) || []).length, 3, 'The four remaining observations connect directly');
+      assert.equal(chart.querySelectorAll(`circle.draggable-series-${key}[data-fiscal-year="2018"]`).length, 0);
+      const coordinates = [...connectedPath.matchAll(/[ML]([^,]+),([^ML]+)/g)].map(match => [Number(match[1]), Number(match[2])]);
+      const expected = originalDots.get(key).filter((_, index) => index !== 2);
+      for (let index = 0; index < coordinates.length; index++) {
+        assert.ok(Math.abs(coordinates[index][0] - Number(expected[index][0])) < 0.001);
+        assert.ok(Math.abs(coordinates[index][1] - Number(expected[index][1])) < 0.001);
+      }
+    }
     await React.act(async () => { document.querySelector('.year-tick[aria-label*="2018"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
     const quarterStudy = { ...study, quarterly: [
       { ...study.annual[0], periodEnd: '2019-03-31', fiscalYear: 2019, quarter: 1 },
