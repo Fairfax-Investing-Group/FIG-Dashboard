@@ -26,6 +26,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
   let creates = 0;
   globalThis.fetch = (url, options) => {
     calls.push({ url, options });
+    if (url === '/api/studies/preload') return Promise.resolve(response({ preloading: true }));
     if (url === '/api/studies?stage=fundamentals') {
       creates++;
       if (creates === 1) firstId = JSON.parse(options.body).studyId;
@@ -55,7 +56,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
               return <main data-study={props.study.id}><h1>{props.study.company.name}</h1><input aria-label="Forecast" value={edit} onChange={e=>setEdit(e.target.value)}/><span data-status>{props.detailsStatus}</span><span data-primary>{props.fundamentalsStatus}</span><button onClick={props.onBack}>Back</button><button onClick={props.onRetryDetails}>Retry details</button></main>;
             }`
           : args.path === './SearchPage'
-            ? `import React from 'react'; export default function Search({onSelect}) { return <button onClick={()=>onSelect({ticker:'TEST',cik:123,name:'Test company'})}>Create study</button>; }`
+            ? `import React from 'react'; export default function Search({onSelect,onPreload}) { const company={ticker:'TEST',cik:123,name:'Test company'}; return <><button onClick={()=>onPreload(company)}>Highlight result</button><button onClick={()=>onSelect(company)}>Create study</button></>; }`
             : `export default function Login() { return null; }` }));
       },
     }] });
@@ -67,6 +68,11 @@ test('Fundamentals mounts before completion; background retries and merges prese
     const navigate = hash => React.act(async () => { window.location.hash = hash; await settle(); });
     root = createRoot(document.getElementById('root'));
     await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(App))));
+    await click('Highlight result');
+    assert.equal(calls[0].url, '/api/studies/preload');
+    assert.deepEqual(JSON.parse(calls[0].options.body), { ticker: 'TEST', cik: 123 });
+    assert.equal(document.querySelector('[data-study]'), null, 'Highlighting keeps the search page open');
+    calls.length = 0;
     await click('Create study');
     assert.equal(calls.length, 1);
     assert.equal(window.studyCodeLoaded, true, 'Study/chart code downloads before the financial response arrives');

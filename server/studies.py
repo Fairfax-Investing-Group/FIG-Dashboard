@@ -262,7 +262,12 @@ def build_study(company, include_peers, persist, fundamentals_only, study_id=Non
     study_id = study_id or str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
     if on_progress and fundamentals_only:
-        results, errors = progressive_inputs(company, study_id, created_at, on_progress)
+        from server.study_preload import take_preload
+        preload = take_preload(company)
+        if preload is not None:
+            results, errors = preload.consume(study_id, created_at, on_progress)
+        else:
+            results, errors = progressive_inputs(company, study_id, created_at, on_progress)
     else:
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
