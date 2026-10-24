@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
 import LoginPage from './LoginPage';
-const StudyPage = lazy(() => import('./StudyPage'));
-import type { StudyDocument } from './types';
+import StudyPage from './StudyPage';
+import { pendingStudy, unknownPendingStudy, rememberStudyCompany } from './pendingStudy';
+import type { Study, StudyDocument } from './types';
 import { studyView } from './studyDocument';
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
@@ -22,18 +23,32 @@ export default function App() {
   const [studyDocument, setStudyDocument] = useState<StudyDocument | null>(null);
   const study = useMemo(() => studyDocument?.SchemaVersion === 1 ? studyView(studyDocument) : null, [studyDocument, studyView]);
   const [pending, setPending] = useState<Company | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [pendingView, setPendingView] = useState<Study | null>(() => {
+    const id = /^\/study\/([a-f0-9-]{36})$/.exec(readRoute())?.[1];
+    return id ? unknownPendingStudy(id) : null;
+  });
+  const [loading, setLoading] = useState(Boolean(pendingView));
+  const [loadRetry, setLoadRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [readyStudyId, setReadyStudyId] = useState<string | null>(null);
+  const [detailsStatus, setDetailsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [detailsRetry, setDetailsRetry] = useState(0);
+  const fundamentalsReady = useCallback((id: string) => setReadyStudyId(id), []);
   const cache = useRef(new Map<string, StudyDocument>());
   const request = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const navigate = () => {
       request.current?.abort();
+      const next = readRoute();
+      const id = /^\/study\/([a-f0-9-]{36})$/.exec(next)?.[1];
+      const saved = id ? cache.current.get(id) : null;
       setPending(null);
-      setLoading(false);
+      setPendingView(id && !saved ? unknownPendingStudy(id) : null);
+      setStudyDocument(saved ?? null);
+      setLoading(Boolean(id && !saved));
       setError(null);
-      setRoute(readRoute());
+      setRoute(next);
     };
     window.addEventListener('hashchange', navigate);
     return () => { window.removeEventListener('hashchange', navigate); request.current?.abort(); };
@@ -44,37 +59,69 @@ export default function App() {
     const match = /^\/study\/([a-f0-9-]{36})$/.exec(route);
     if (!match) { setError('This study link is invalid. Return to search to create a study.'); return; }
     const cached = cache.current.get(match[1]);
-    if (cached?.SchemaVersion === 1) { setStudyDocument(cached); setLoading(false); return; }
+    if (cached?.SchemaVersion === 1) { setStudyDocument(cached); setPendingView(null); setLoading(false); return; }
     const controller = new AbortController();
     request.current = controller;
     setLoading(true);
     setError(null);
-    fetch(`/api/studies/${match[1]}`, { signal: controller.signal })
+    setPendingView(previous => previous?.id === match[1] ? previous : unknownPendingStudy(match[1]));
+    fetch(`/api/studies/${match[1]}?view=fundamentals`, { signal: controller.signal })
       .then(readResponse)
-      .then(data => { cache.current.set(data.Study.StudyID, data); setStudyDocument(data); })
-      .catch(error => { if (error.name !== 'AbortError') setError(error.message); })
+      .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyView(data).company); setStudyDocument(data); setPendingView(null); })
+      .catch(error => { if (!controller.signal.aborted && error.name !== 'AbortError') setError(error.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [route]);
+  }, [route, loadRetry]);
 
-  async function createStudy(company: Company) {
+  const studyId = studyDocument?.Study.StudyID;
+  const dataStage = studyDocument?.Metadata.DataStage;
+  useEffect(() => {
+    // The mounted StudyPage signals that Fundamentals is on screen. Do not
+    // start optional requests before the first financial response is displayed.
+    if (!studyId || readyStudyId !== studyId || dataStage !== 'fundamentals' || loading || route !== `/study/${studyId}`) return;
+    const controller = new AbortController();
+    setDetailsStatus('loading');
+    fetch(`/api/studies/${studyId}/complete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: controller.signal,
+    }).then(readResponse).then(data => {
+      if (controller.signal.aborted || readRoute() !== `/study/${studyId}`) return;
+      cache.current.set(studyId, data);
+      setStudyDocument(data);
+      setDetailsStatus('idle');
+    }).catch(error => {
+      if (!controller.signal.aborted && error.name !== 'AbortError') setDetailsStatus('error');
+    });
+    return () => controller.abort();
+  }, [studyId, dataStage, readyStudyId, loading, route, detailsRetry]);
+
+  async function createStudy(company: Company, retryId?: string) {
     if (request.current && !request.current.signal.aborted && loading) return;
     const controller = new AbortController();
     request.current = controller;
+    const id = retryId ?? crypto.randomUUID();
+    const initial = retryId && pendingView?.id === retryId ? pendingView
+      : study && study.company.cik === company.cik ? { ...study, id } : pendingStudy(company, id);
+    rememberStudyCompany(id, company);
+    setPendingView(initial);
+    setStudyDocument(null);
     setPending(company);
+    setReadyStudyId(null);
+    setDetailsStatus('idle');
     setError(null);
     setLoading(true);
     try {
-      const data = await fetch('/api/studies', {
+      const data = await fetch('/api/studies?stage=fundamentals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker: company.ticker, cik: company.cik }),
+        body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id }),
         signal: controller.signal,
       }).then(readResponse);
       if (controller.signal.aborted) return;
       cache.current.set(data.Study.StudyID, data);
       setStudyDocument(data);
       setPending(null);
+      setPendingView(null);
+      setRoute(`/study/${data.Study.StudyID}`);
       window.location.hash = `/study/${data.Study.StudyID}`;
     } catch (error) {
       if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Could not create this study.');
@@ -89,14 +136,21 @@ export default function App() {
     setError(null);
     setLoading(false);
     setStudyDocument(null);
+    setPendingView(null);
+    setRoute('');
     window.location.hash = '';
   }
 
   if (route === '/login') return <LoginPage/>;
-  if (loading || error) return <main className="search-page state-page">
-    <button className="back-button" onClick={backToSearch}>← Back to search</button>
-    {loading ? <div role="status" className="loading-state"><div className="spinner"/><h1>{pending ? `Studying ${pending.ticker}` : 'Opening your study'}</h1><p>{pending ? 'Gathering annual and quarterly financials, prices, analyst estimates, and industry peers.' : 'Loading your saved study.'}</p><small>Expanded studies can take a few minutes. Your study will show any unavailable data.</small></div> : <div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p>{pending && <button className="primary-button" onClick={() => createStudy(pending)}>Try again</button>}</div>}
-  </main>;
-  if (route && study) return <Suspense fallback={<main className="search-page"><p role="status">Loading study charts…</p></main>}><StudyPage study={study} onBack={backToSearch} onRefresh={() => createStudy(study.company)}/></Suspense>;
+  const displayedStudy = pendingView ?? study;
+  if (displayedStudy && (pendingView || route)) return <StudyPage
+    key={displayedStudy.id} study={displayedStudy} onBack={backToSearch}
+    onRefresh={() => createStudy(displayedStudy.company)} onFundamentalsReady={fundamentalsReady}
+    fundamentalsStatus={pendingView ? error ? 'error' : 'loading' : 'idle'}
+    fundamentalsError={error}
+    onRetryFundamentals={() => pending ? createStudy(pending, pendingView?.id) : setLoadRetry(value => value + 1)}
+    detailsStatus={!pendingView && dataStage === 'fundamentals' ? detailsStatus === 'error' ? 'error' : 'loading' : 'idle'}
+    onRetryDetails={() => setDetailsRetry(value => value + 1)}/>;
+  if (error) return <main className="search-page state-page"><button className="back-button" onClick={backToSearch}>← Back to search</button><div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p></div></main>;
   return <SearchPage onSelect={createStudy}/>;
 }

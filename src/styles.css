@@ -419,6 +419,8 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 
 /* Study sections and the historical valuation worksheet. */
 .study-nav { justify-content:flex-start; }
+.study-background-status { margin:12px 0; padding:10px 14px; border:1px solid #dce5ef; border-radius:6px; background:#f5f8fc; color:#526980; font-size:11px; line-height:1.6; }
+.study-nav .export-button[aria-disabled=true] { cursor:default; }
 .study-tabs { display:flex; align-items:center; gap:4px; margin-left:12px; }
 .study-tabs button { padding:5px 10px; border:1px solid transparent; border-radius:5px; background:transparent; color:var(--navy-soft); font-size:11px; font-weight:500; white-space:nowrap; }
 .study-tabs button:hover { background:var(--ui-hover); }

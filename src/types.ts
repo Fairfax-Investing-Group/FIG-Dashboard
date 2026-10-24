@@ -27,7 +27,7 @@ export type AnnualRow = {
   epsSource: FactSource | null;
   pretaxProfitSource: FactSource | null;
 };
-export type Source = { status: 'ok' | 'error'; url: string; retrievedAt: string | null; error: string | null };
+export type Source = { status: 'ok' | 'error' | 'loading'; url: string; retrievedAt: string | null; error: string | null };
 export type MarketQuote = {
   currency: string | null;
   regular: { price: number; change: number | null; percent: number | null; time: string | null } | null;
@@ -54,6 +54,7 @@ export type Study = {
   annual: AnnualRow[];
   quarterly?: (AnnualRow & { fiscalYear: number; quarter: number; form?: string })[];
   prices: { date: string; close: number }[];
+  priceInterval?: '1d' | '1wk';
   sources: { sec: Source; yfinance: Source };
   warnings: string[];
   growthRates?: Record<Metric, number | null>;
@@ -81,9 +82,12 @@ export type StudyDocument = {
   }[];
   QuarterlyData?: (StudyDocument['AnnualData'][number] & { QuarterNo: number; Form?: string })[];
   DailyPrices: { Date: string; Close: number }[];
+  WeeklyPrices?: { Date: string; Close: number }[];
   MonthlyPrices: { Month: string; Date: string; Close: number }[];
   ComputedValues: { GrowthMethod: 'log-linear-regression'; SalesGrowthRate: number | null; EPSGrowthRate: number | null; PTPGrowthRate: number | null };
   Metadata: {
+    DataStage?: 'fundamentals' | 'complete';
+    PriceInterval?: '1d' | '1wk';
     FinancialCurrency: string | null; PriceCurrency: string | null;
     Sources: Record<'SEC' | 'YahooFinance', { Status: 'ok' | 'error'; URL: string; RetrievedAt: string | null; Error: string | null }>;
     Warnings: string[];

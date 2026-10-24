@@ -38,6 +38,20 @@ test('canonical amounts and rates convert exactly once into chart/table units', 
   assert.equal(input.AnnualData[0].Sales, 90272);
 });
 
+test('weekly chart points are explicit and seamlessly replaced by daily completion', () => {
+  const input = document();
+  input.DailyPrices = [];
+  input.WeeklyPrices = [{ Date: '2026-10-19', Close: 50 }];
+  input.Metadata.PriceInterval = '1wk';
+  const weekly = studyView(input);
+  assert.equal(weekly.priceInterval, '1wk');
+  assert.deepEqual(weekly.prices, [{ date: '2026-10-19', close: 50 }]);
+  const full = studyView({ ...input, DailyPrices: [{ Date: '2026-10-23', Close: 51 }], Metadata: { ...input.Metadata, PriceInterval: '1d' } });
+  assert.equal(full.priceInterval, '1d');
+  assert.deepEqual(full.prices, [{ date: '2026-10-23', close: 51 }]);
+  assert.deepEqual(full.annual, weekly.annual);
+});
+
 test('missing values and normalization status survive conversion', () => {
   const input = document();
   Object.assign(input.AnnualData[0], { EPS: null, Sales: null, PTP: null, EPSSplitFactor: null });

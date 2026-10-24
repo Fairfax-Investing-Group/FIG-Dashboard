@@ -103,13 +103,19 @@ def peer_limit():
         return 3
 
 
-def fetch_market(stock, include_peers=True):
-    warnings, profile, analyst, company, peer_symbols = [], {}, [], {}, []
+def fetch_market(stock, include_peers=True, fundamentals_only=False, profile=None):
+    warnings, analyst, company, peer_symbols = [], [], {}, []
     errors = []
-    try:
-        profile = stock.get_info() or {}
-    except Exception:
-        errors.append('company profile')
+    if profile is None:
+        try:
+            profile = stock.get_info() or {}
+        except Exception:
+            profile = {}
+            errors.append('company profile')
+    if fundamentals_only:
+        return {'profile': profile, 'warnings': warnings,
+                'source': {'Status': 'ok' if profile else 'error', 'URL': f'https://finance.yahoo.com/quote/{stock.ticker}/',
+                           'RetrievedAt': datetime.now(timezone.utc).isoformat(), 'Error': ', '.join(errors) or None}}
     try:
         earnings, revenue = stock.get_earnings_estimate(), stock.get_revenue_estimate()
         analyst, company = estimates(profile, earnings, revenue)

@@ -204,7 +204,7 @@ test('year exclusions update the existing chart without adding or replacing char
     await React.act(async () => { document.querySelector('.year-tick[aria-label*="2021"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
     assert.equal(chart.querySelectorAll('circle[data-period="quarterly"]').length, 0);
     await React.act(async () => { document.querySelector('.year-tick[aria-label*="2021"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
-    const annualStudy = { ...quarterStudy, annual: [...study.annual, { ...study.annual[4], periodEnd: '2021-12-31', lowPE: 8 }] };
+    const annualStudy = { ...quarterStudy, annual: [...study.annual, { ...study.annual[4], periodEnd: '2021-12-31', lowPE: 8, dividendPerShare: 0.6 }] };
     await React.act(async () => { root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: annualStudy, onBack() {}, onRefresh() {} }))); });
     assert.equal(chart.querySelectorAll('circle[data-period="quarterly"]').length, 0, 'A new annual report replaces the prior interim quarter markers');
     assert.equal(chart.querySelectorAll('circle.draggable-series-sales[data-period="annual"]').length, 6);
@@ -260,6 +260,11 @@ test('year exclusions update the existing chart without adding or replacing char
     await React.act(async () => valuationTab.click());
     assert.equal(valuationPanel.querySelector('[data-testid="high-eps-forecast"]').textContent, '2.25');
     const forecastInput = label => [...valuationPanel.querySelectorAll('label')].find(element => element.firstChild?.textContent.trim() === label)?.querySelector('input');
+    assert.equal(Number(forecastInput('Annual dividend / share').value), 0.2);
+    await React.act(async () => valuationPanel.querySelector('[aria-label="Exclude Dividend per share for 2021"]').click());
+    assert.equal(Number(forecastInput('Annual dividend / share').value), 0.1);
+    await React.act(async () => valuationPanel.querySelector('[aria-label="Restore Dividend per share for 2021"]').click());
+    assert.equal(Number(forecastInput('Annual dividend / share').value), 0.2);
     await enter(forecastInput('Forecast average high P/E'), '20');
     await enter(forecastInput('Forecast average low P/E'), '10');
     await enter(forecastInput('Forecast average payout (%)'), '50');
@@ -274,6 +279,12 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.equal(valuationPanel.querySelector('.forecast-zone').textContent, 'Buy');
     const yieldRow = [...valuationPanel.querySelectorAll('.forecast-return-table tr')].find(row => row.querySelector('th')?.textContent === 'Estimated average yield');
     assert.deepEqual([...yieldRow.querySelectorAll('td')].map(cell => cell.textContent), ['2.5%', '3.3%']);
+    const ratioSummary = [...valuationPanel.querySelector('.forecast-summary').querySelectorAll('dl>div')].find(row => row.querySelector('dt').textContent === 'Upside / downside');
+    assert.equal(forecastInput('Target upside/downside').value, ratioSummary.querySelector('dd').textContent.split(' : ')[0]);
+    const returnRow = [...valuationPanel.querySelectorAll('.forecast-return-table tr')].find(row => row.querySelector('th')?.textContent === 'Estimated annual return');
+    assert.equal(`${Number(forecastInput('Target annual return (%)').value).toFixed(1)}%`, returnRow.querySelector('td').textContent);
+    await enter(forecastInput('Target upside/downside'), '4');
+    await enter(forecastInput('Target annual return (%)'), '12');
     await React.act(async () => valuationPanel.querySelector('.forecast-link').click());
     assert.equal(document.getElementById('panel-fundamentals').hidden, false);
     await enter(epsForecast, '20');
@@ -281,6 +292,8 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.equal(valuationPanel.querySelector('[data-testid="high-eps-forecast"]').textContent, '3.48');
     assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '$69.67');
     assert.equal(forecastInput('Forecast average high P/E').value, '20');
+    assert.equal(forecastInput('Target upside/downside').value, '4');
+    assert.equal(forecastInput('Target annual return (%)').value, '12');
     const method = label => [...valuationPanel.querySelectorAll('label')].find(element => element.firstChild?.textContent.trim() === label).querySelector('select');
     const choose = async (label, value) => React.act(async () => {
       const select = method(label);
@@ -303,10 +316,14 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.equal(method('High-price method').value, 'pe');
     assert.equal(method('Low-price method').value, 'pe');
     assert.equal(valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent, '—');
+    assert.equal(forecastInput('Target upside/downside').value, '');
+    assert.equal(forecastInput('Target annual return (%)').value, '');
     const useAverage = (kind, years) => React.act(async () => valuationPanel.querySelector(`[aria-label="Use ${years}-year average ${kind} P/E"]`).click());
     const exclude = label => React.act(async () => valuationPanel.querySelector(`.valuation-table [aria-label="${label}"]`).click());
     await useAverage('high', 5);
     await useAverage('low', 10);
+    assert.notEqual(forecastInput('Target upside/downside').value, '');
+    assert.notEqual(forecastInput('Target annual return (%)').value, '');
     const linkedHigh = forecastInput('Forecast average high P/E').value;
     const linkedLow = forecastInput('Forecast average low P/E').value;
     const linkedHighPrice = valuationPanel.querySelector('[data-testid="forecast-high-price"]').textContent;
@@ -334,6 +351,17 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.equal(valuationPanel.querySelector('[aria-label="Use 5-year average high P/E"]').getAttribute('aria-pressed'), 'false');
     await exclude('Restore High P/E for 2020');
     assert.equal(document.querySelectorAll('.recharts-wrapper').length, 1);
+    const weeklyStudy = { ...annualStudy, priceInterval: '1wk', prices: [{ date: '2020-12-21', close: 12 }, { date: '2020-12-28', close: 14 }] };
+    await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: weeklyStudy, onBack() {}, onRefresh() {} }))));
+    assert.match(document.querySelector('.company-quote .quote-date').textContent, /Weekly close/);
+    assert.match(document.querySelector('.regular-market-quote .quote-change').textContent, /Daily change unavailable/);
+    assert.match(document.querySelector('.sidebar-chart-controls').textContent, /weekly closes/);
+    assert.equal(document.querySelector('.recharts-wrapper'), chart);
+    assert.equal(forecastInput('Forecast average high P/E').value, '20');
+    await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: { ...annualStudy, priceInterval: '1d' }, onBack() {}, onRefresh() {} }))));
+    assert.doesNotMatch(document.querySelector('.company-quote .quote-date').textContent, /Weekly close/);
+    assert.equal(document.querySelector('.recharts-wrapper'), chart);
+    assert.equal(forecastInput('Forecast average high P/E').value, '20');
     const januaryStudy = { ...annualStudy, id: 'january-year-display', quarterly: [], annual: annualStudy.annual.map(row => ({ ...row, fiscalYear: Number(row.periodEnd.slice(0, 4)), periodEnd: `${row.periodEnd.slice(0, 4)}-01-31` })) };
     await React.act(async () => { root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: januaryStudy, onBack() {}, onRefresh() {} }))); });
     await React.act(async () => { await new Promise(resolve => window.requestAnimationFrame(resolve)); });

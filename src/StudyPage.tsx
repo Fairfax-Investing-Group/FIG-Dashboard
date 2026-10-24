@@ -187,7 +187,7 @@ function YearTick({ x = 0, y = 0, payload, excludedYears, onToggle }: { x?: numb
   </g>;
 }
 
-function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYears, excludedValues, onResetExclusions }: { annual: AnnualRow[]; study: Study; excludedYears: number[]; excludedValues: string[]; onToggleYear: (year: number) => void; onRestoreYears: () => void; onResetExclusions: () => void }) {
+function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYears, excludedValues, onResetExclusions, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; excludedYears: number[]; excludedValues: string[]; onToggleYear: (year: number) => void; onRestoreYears: () => void; onResetExclusions: () => void }) {
   const [offsets, setOffsets] = useState<Partial<Record<ChartKey, number>>>({});
   const [hidden, setHidden] = useState<ChartLineId[]>([]);
   const yearOffset = reportingYearOffset(annual);
@@ -205,7 +205,8 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
   const points = new Map<number, ChartPoint>();
   for (const point of [...financials, ...quarters, ...prices]) points.set(point.timestamp, { ...points.get(point.timestamp), ...point });
   const timeline = [...points.values()].sort((a, b) => a.timestamp - b.timestamp);
-  const series = chartSeries.map(metric => {
+  const series = chartSeries.map(definition => {
+    const metric = definition.key === 'close' && study.priceInterval === '1wk' ? { ...definition, title: 'Split-normalized price · Weekly closes' } : definition;
     const source = (metric.key === 'close' ? prices : [...financials, ...quarters]).slice().sort((a, b) => a.timestamp - b.timestamp);
     const baseline = source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.[metric.key];
     const data = source.map(point => ({ ...point, [metric.key]: point[metric.key] == null ? null : baseline == null ? (point[metric.key] === 0 ? 0 : null) : point[metric.key]! / Math.abs(baseline) * 100 }));
@@ -273,7 +274,7 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
     const millions = line.key === 'sales' || line.key === 'pretaxProfit';
     const currency = line.key === 'close' ? study.priceCurrency : study.financialCurrency;
     const formatter = new Intl.NumberFormat('en-US', { ...(currency ? { style: 'currency' as const, currency, currencyDisplay: 'narrowSymbol' as const } : {}), minimumFractionDigits: millions ? 0 : 2, maximumFractionDigits: millions ? 0 : 2 });
-    return { id: line.id, name: line.kind === 'fit' ? line.name : metric.title, observations: line.observations, color: line.color, periods: Object.fromEntries(metric.rawData.map(point => [point.timestamp, point.quarter == null ? String(new Date(point.timestamp).getUTCFullYear()) : `Q${point.quarter} ${point.displayYear ?? point.fiscalYear} · ${line.key === 'bookValuePerShare' ? 'Quarter-end' : 'TTM'}`])), formatValue: (value: number) => `${formatter.format(millions ? value / 1_000_000 : value)}${millions ? 'M' : ''}`, points: data.map(point => ({ timestamp: point.timestamp, value: point[line.key] ?? null })) };
+    return { id: line.id, name: line.kind === 'fit' ? line.name : metric.title, observations: line.observations, color: line.color, periods: Object.fromEntries(metric.rawData.map(point => [point.timestamp, line.key === 'close' ? `${study.priceInterval === '1wk' ? 'Week of ' : ''}${chartDate(point.timestamp)}` : point.quarter == null ? String(new Date(point.timestamp).getUTCFullYear()) : `Q${point.quarter} ${point.displayYear ?? point.fiscalYear} · ${line.key === 'bookValuePerShare' ? 'Quarter-end' : 'TTM'}`])), formatValue: (value: number) => `${formatter.format(millions ? value / 1_000_000 : value)}${millions ? 'M' : ''}`, points: data.map(point => ({ timestamp: point.timestamp, value: point[line.key] ?? null })) };
   });
   const domain: [number, number] = isolatedPoints.length ? [Math.min(...isolatedPoints) - 0.2, Math.max(...isolatedPoints) + 0.2] : [0, series.length - 1 + bandHeight + 0.3];
   const baselines = spaced.filter(metric => visibleLines.some(line => line.key === metric.key)).flatMap(metric => {
@@ -282,13 +283,13 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
   });
   return <section className="chart-card overlay-chart" aria-label="Combined historical chart">
     <div className="chart-workspace">
-    <aside className="chart-series-legend" aria-label="Individual line visibility">{series.map(metric => <div key={metric.key} className={`chart-series-item${visibleLines.some(line => line.key === metric.key) ? '' : ' is-hidden'}`}>
+    <aside className="chart-series-legend" aria-label="Individual line visibility">{series.map(metric => <div key={metric.key} className={`chart-series-item${pending || visibleLines.some(line => line.key === metric.key) ? '' : ' is-hidden'}`}>
       <span title={`${metric.title} · ${metric.latest ? `As of ${chartDate(metric.latest.reportedAt ?? metric.latest.timestamp)}` : 'Unavailable'}`}><i style={{ background: metric.color }}/>{metric.label}</span>
       <div className="line-toggles">{lines.filter(line => line.key === metric.key).map(line => {
         const action = hidden.includes(line.id) ? 'Show' : 'Hide';
         return <button key={line.id} title={`${action} ${line.name}`} aria-label={`${action} ${line.name}`} aria-pressed={!hidden.includes(line.id)} onClick={() => toggleLine(line.id)}><i style={{ background: metric.color, opacity: line.kind === 'fit' ? 0.4 : 1 }}/>{action === 'Hide' ? 'H' : 'S'}{line.kind === 'fit' ? 'F' : 'A'}</button>;
       })}</div>
-    </div>)}<div className="sidebar-chart-controls"><p className="legend-control-key">HA/SA: Hide/Show Actual · HF/SF: Hide/Show Fit</p><div><button onClick={() => { setOffsets({}); setHidden([]); onResetExclusions(); }}>Reset chart</button>{excludedYears.length > 0 && <button onClick={onRestoreYears}>Restore years</button>}</div></div></aside>
+    </div>)}<div className="sidebar-chart-controls">{study.priceInterval === '1wk' && <p className="legend-control-key">Price: weekly closes</p>}<p className="legend-control-key">HA/SA: Hide/Show Actual · HF/SF: Hide/Show Fit</p><div><button onClick={() => { setOffsets({}); setHidden([]); onResetExclusions(); }}>Reset chart</button>{excludedYears.length > 0 && <button onClick={onRestoreYears}>Restore years</button>}</div></div></aside>
     <div className="chart-main">
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 4, right: 8, bottom: 0, left: 0 }} accessibilityLayer>
       <CartesianGrid vertical horizontal={false} stroke="#e8edf0" syncWithTicks/>
@@ -298,32 +299,40 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
       {spaced.filter(metric => metric.key !== 'close' && lineVisible(`${metric.key}:fit`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={1} strokeOpacity={0.4} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false} style={{ cursor: 'grab' }}/>)}
       {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={metric.key === 'close' ? 0.8 : 1.5} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : ({ cx, cy, payload }) => typeof cx !== 'number' || typeof cy !== 'number' || !Number.isFinite(cx) || !Number.isFinite(cy) ? <g/> : <circle key={payload.timestamp} className={`draggable-series-${metric.key}`} data-fiscal-year={payload.fiscalYear} data-display-year={payload.displayYear} data-period={payload.quarter == null ? 'annual' : 'quarterly'} cx={cx} cy={cy} r={payload.quarter == null ? 2.2 : 2.8} fill={payload.quarter == null ? metric.color : quarterlyDotFill(metric.color)} strokeWidth={1.2} stroke={metric.color}><title>{metric.title} · {payload.quarter == null ? `Year ${payload.displayYear ?? payload.fiscalYear} · Year ended ${chartDate(payload.reportedAt ?? payload.timestamp)}` : `Q${payload.quarter} ${payload.displayYear ?? payload.fiscalYear} · ${metric.key === 'bookValuePerShare' ? 'Quarter-end' : 'Trailing 12 months'}`}</title></circle>} activeDot={false} connectNulls={false} isAnimationActive={false} style={{ cursor: 'grab' }}/>)}
       <LineHoverLayer lines={hoverLines} onMove={(key, delta) => { setOffsets(current => ({ ...current, [key]: (current[key] ?? 0) + delta })); }}/>
-    </LineChart></ResponsiveContainer></div> : <div className="chart-empty">{lines.length ? 'All lines are hidden. Use Show in the sidebar or Reset chart to restore them.' : 'No comparable history is available. Refresh to try again.'}</div>}
+    </LineChart></ResponsiveContainer></div> : pending ? <div className="chart-canvas overlay-canvas chart-pending" aria-label="Historical chart"/> : <div className="chart-empty">{lines.length ? 'All lines are hidden. Use Show in the sidebar or Reset chart to restore them.' : 'No comparable history is available. Refresh to try again.'}</div>}
     </div>
-    <aside className="company-description-panel" aria-labelledby="company-description-title"><div className="company-description-content"><h2 id="company-description-title">About {study.company.ticker}</h2>{study.overview?.Description?.trim() ? study.overview.Description.trim().split(/\n+/).filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>) : <p>Company description is unavailable in this study.</p>}</div></aside>
+    <aside className="company-description-panel" aria-labelledby="company-description-title"><div className="company-description-content"><h2 id="company-description-title">About {study.company.ticker}</h2>{study.overview?.Description?.trim() ? study.overview.Description.trim().split(/\n+/).filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>) : !pending && <p>Company description is unavailable in this study.</p>}</div></aside>
     </div>
   </section>;
 }
 
 type FinancialForecasts = { sales: string; eps: string };
-function FinancialTable({ annual, study, controls, forecasts, onForecastChange }: { annual: AnnualRow[]; study: Study; controls: TableExclusions; forecasts: FinancialForecasts; onForecastChange: (key: keyof FinancialForecasts, value: string) => void }) {
+const pendingAnnualRows: AnnualRow[] = Array.from({ length: 10 }, (_, index) => ({
+  periodEnd: `${FIRST_HISTORY_YEAR + index}-12-31`, sales: null, eps: null, pretaxProfit: null,
+  salesSource: null, epsSource: null, pretaxProfitSource: null,
+}));
+
+function FinancialTable({ annual, study, controls, forecasts, onForecastChange, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; controls: TableExclusions; forecasts: FinancialForecasts; onForecastChange: (key: keyof FinancialForecasts, value: string) => void }) {
   const { excludedYears } = controls;
-  const rows = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+  const placeholders = pending && annual.length === 0;
+  const rows = placeholders ? pendingAnnualRows : [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
   const yearOffset = reportingYearOffset(annual);
-  const currency = study.financialCurrency === 'USD' ? '$' : study.financialCurrency || 'Currency unavailable';
+  const currency = study.financialCurrency === 'USD' ? '$' : study.financialCurrency || '';
+  const totalUnit = currency ? `${currency}M` : 'millions';
+  const perShareUnit = currency ? ` (${currency})` : '';
   const labels: Record<FinancialChartKey, string> = {
-    sales: `Historical sales (${currency}M)`,
-    eps: `Historical EPS (${currency})`,
-    pretaxProfit: `Pre-tax profit (${currency}M)`,
-    freeCashFlowPerShare: `FCF / Share (${currency})`,
-    bookValuePerShare: `BV / Share (${currency})`,
+    sales: `Historical sales (${totalUnit})`,
+    eps: `Historical EPS${perShareUnit}`,
+    pretaxProfit: `Pre-tax profit (${totalUnit})`,
+    freeCashFlowPerShare: `FCF / Share${perShareUnit}`,
+    bookValuePerShare: `BV / Share${perShareUnit}`,
   };
   return <section className="financial-table-section fundamentals" aria-labelledby="financial-table-title">
     <div className="fundamentals-title"><h2 id="financial-table-title">Fundamental Company Data</h2><span>Annual financials</span></div>
     <ExclusionHelp controls={controls}/>
     <div className="financial-table-scroll"><table>
       <caption className="sr-only">Annual company data by fiscal year, historical annualized growth, forecast assumptions, and five-year estimates. EPS is split-normalized.</caption>
-      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd} className={excludedYears.includes(reportingYear(row, yearOffset)) ? 'excluded-year-heading' : undefined} title={`Fiscal year ended ${displayDate(row.periodEnd)}${excludedYears.includes(reportingYear(row, yearOffset)) ? ' · Excluded from growth' : ''}`}><ExclusionYear year={reportingYear(row, yearOffset)} controls={controls}/></th>)}<th scope="col" className="calculated-column">Growth (%)</th><th scope="col">Forecast (%)</th><th scope="col">5 Yr Est</th></tr></thead>
+      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd} className={excludedYears.includes(reportingYear(row, yearOffset)) ? 'excluded-year-heading' : undefined} title={placeholders ? undefined : `Fiscal year ended ${displayDate(row.periodEnd)}${excludedYears.includes(reportingYear(row, yearOffset)) ? ' · Excluded from growth' : ''}`}><>{placeholders ? <span className="pending-period" aria-label="Reporting year pending">—</span> : <ExclusionYear year={reportingYear(row, yearOffset)} controls={controls}/>}</></th>)}<th scope="col" className="calculated-column">Growth (%)</th><th scope="col">Forecast (%)</th><th scope="col">5 Yr Est</th></tr></thead>
       <tbody>{metrics.map(metric => {
         const perShare = metric.key !== 'sales' && metric.key !== 'pretaxProfit';
         const scale = perShare ? 1 : 1_000_000;
@@ -369,7 +378,7 @@ function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (num
   </svg>;
 }
 
-function ManagementTable({ annual }: { annual: AnnualRow[] }) {
+function ManagementTable({ annual, pending = false }: { annual: AnnualRow[]; pending?: boolean }) {
   const [excludedYears, setExcludedYears] = useState<number[]>([]);
   const [excludedValues, setExcludedValues] = useState<string[]>([]);
   const controls: TableExclusions = {
@@ -381,7 +390,8 @@ function ManagementTable({ annual }: { annual: AnnualRow[] }) {
     },
     onResetExclusions: () => { setExcludedYears([]); setExcludedValues([]); },
   };
-  const rows = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+  const placeholders = pending && annual.length === 0;
+  const rows = placeholders ? pendingAnnualRows : [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
   const yearOffset = reportingYearOffset(annual);
   const definitions = [
     { key: 'pretaxMargin' as const, name: '% Pre-Tax Profit on Sales', lowerIsBetter: false },
@@ -394,7 +404,7 @@ function ManagementTable({ annual }: { annual: AnnualRow[] }) {
     <ExclusionHelp controls={controls}/>
     <div className="financial-table-scroll"><table>
       <caption className="sr-only">Annual management ratios, latest five-year averages, and historical trends.</caption>
-      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd}><ExclusionYear year={reportingYear(row, yearOffset)} controls={controls}/></th>)}<th scope="col" className="calculated-column">5 Yr Avg</th><th scope="col">Trend</th></tr></thead>
+      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd}><>{placeholders ? <span className="pending-period" aria-label="Reporting year pending">—</span> : <ExclusionYear year={reportingYear(row, yearOffset)} controls={controls}/>}</></th>)}<th scope="col" className="calculated-column">5 Yr Avg</th><th scope="col">Trend</th></tr></thead>
       <tbody>{definitions.map(metric => {
         const values = rows.map(row => isValueExcluded(controls, metric.key, reportingYear(row, yearOffset)) ? null : row[metric.key] ?? null);
         return <tr key={metric.key}><th scope="row">{metric.name}</th>
@@ -411,6 +421,7 @@ function useMarketQuote(ticker: string) {
   const [quote, setQuote] = useState<MarketQuote | null>(null);
   const [quoteStatus, setQuoteStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   useEffect(() => {
+    if (!ticker) return;
     let active = true;
     let controller: AbortController | null = null;
     setQuote(null);
@@ -437,24 +448,25 @@ function useMarketQuote(ticker: string) {
   return { quote, quoteStatus };
 }
 
-function CompanyHeader({ study, quote, quoteStatus }: { study: Study; quote: MarketQuote | null; quoteStatus: 'loading' | 'ok' | 'error' }) {
+function CompanyHeader({ study, quote, quoteStatus, pending = false }: { study: Study; quote: MarketQuote | null; quoteStatus: 'loading' | 'ok' | 'error'; pending?: boolean }) {
   const overview = study.overview ?? {};
   const latest = study.prices.at(-1), previous = study.prices.at(-2);
-  const live = quote?.currency === study.priceCurrency ? quote : null;
+  const live = quote && (!study.priceCurrency || quote.currency === study.priceCurrency) ? quote : null;
+  const priceCurrency = study.priceCurrency ?? live?.currency;
   const regular = live?.regular;
   const post = live?.postMarket;
   const closingPrice = regular?.price ?? latest?.close;
-  const change = regular ? regular.change : latest && previous ? latest.close - previous.close : null;
+  const change = regular ? regular.change : study.priceInterval !== '1wk' && latest && previous ? latest.close - previous.close : null;
   const percent = regular ? regular.percent : change !== null && previous && previous.close > 0 ? change / previous.close * 100 : null;
   const signed = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
   const quoteDate = (value: string) => new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' });
   const price = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat('en-US', {
-    ...(study.priceCurrency ? { style: 'currency', currency: study.priceCurrency, currencyDisplay: 'narrowSymbol' } : {}),
+    ...(priceCurrency ? { style: 'currency', currency: priceCurrency, currencyDisplay: 'narrowSymbol' } : {}),
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(value);
   const compact = (millions: number | null | undefined, currency = false) => millions == null ? '—' : new Intl.NumberFormat('en-US', {
     notation: 'compact', maximumFractionDigits: 1,
-    ...(currency && study.priceCurrency ? { style: 'currency', currency: study.priceCurrency, currencyDisplay: 'narrowSymbol' } : {}),
+    ...(currency && priceCurrency ? { style: 'currency', currency: priceCurrency, currencyDisplay: 'narrowSymbol' } : {}),
   }).format(millions * 1e6);
   const low = overview.LowPriceTtm, high = overview.HighPriceTtm;
   const hasRange = low != null && high != null && high >= low;
@@ -464,8 +476,8 @@ function CompanyHeader({ study, quote, quoteStatus }: { study: Study; quote: Mar
       <div className="company-identity"><span className="company-ticker">{study.company.ticker}</span><div><h1>{study.company.name}</h1><div className="company-classification">{[study.company.exchange, overview.SectorDesc, overview.IndustryDesc].filter(Boolean).join(' · ') || 'Classification unavailable'}</div></div></div>
     </div>
     <div className="company-quote">
-      <div className="regular-market-quote"><strong>{price(closingPrice)}</strong><span className={`quote-change ${change === null || change === 0 ? '' : change > 0 ? 'positive' : 'negative'}`}>{change === null ? 'Daily change unavailable' : `${signed(change)}${percent === null ? '' : ` (${percent > 0 ? '+' : ''}${percent.toFixed(1)}%)`}`}</span><small className="quote-date">{regular?.time ? quoteDate(regular.time) : latest ? `${displayDate(latest.date)} · Close` : 'Closing price unavailable'}</small></div>
-      <div className="post-market-quote" aria-live="polite"><span className="post-market-label">Post-market</span>{post ? <><div><b>{price(post.price)}</b><span className={`quote-change ${post.change === 0 ? '' : post.change > 0 ? 'positive' : 'negative'}`}>{signed(post.change)} ({signed(post.percent)}%)</span></div><small>{quoteDate(post.time)}{quoteStatus === 'error' ? ' · Update unavailable' : ''}</small></> : <small>{quoteStatus === 'loading' ? 'Loading…' : quoteStatus === 'error' ? 'Temporarily unavailable' : 'No after-hours quote available'}</small>}</div>
+      <div className="regular-market-quote"><strong>{price(closingPrice)}</strong><span className={`quote-change ${change === null || change === 0 ? '' : change > 0 ? 'positive' : 'negative'}`}>{change === null ? pending ? '—' : 'Daily change unavailable' : `${signed(change)}${percent === null ? '' : ` (${percent > 0 ? '+' : ''}${percent.toFixed(1)}%)`}`}</span><small className="quote-date">{regular?.time ? quoteDate(regular.time) : latest ? study.priceInterval === '1wk' ? `Week of ${displayDate(latest.date)} · Weekly close` : `${displayDate(latest.date)} · Close` : pending ? '—' : 'Closing price unavailable'}</small></div>
+      <div className="post-market-quote" aria-live="polite"><span className="post-market-label">Post-market</span>{post ? <><div><b>{price(post.price)}</b><span className={`quote-change ${post.change === 0 ? '' : post.change > 0 ? 'positive' : 'negative'}`}>{signed(post.change)} ({signed(post.percent)}%)</span></div><small>{quoteDate(post.time)}{quoteStatus === 'error' ? ' · Update unavailable' : ''}</small></> : <small>{quoteStatus === 'loading' ? '—' : quoteStatus === 'error' ? 'Temporarily unavailable' : 'No after-hours quote available'}</small>}</div>
     </div>
     <div className="company-range"><span>52-Week Range</span><div className={`range-track ${hasRange ? '' : 'unavailable'}`} aria-label={hasRange ? `52-week range: ${price(low)} to ${price(high)}. Latest close: ${price(latest?.close)}` : '52-week range unavailable'}>{hasRange && <div className="range-fill"/>}{position !== null && <i style={{ left: `${position}%` }}/>}</div><div className="range-values"><span>{price(low)}</span><span>{price(high)}</span></div></div>
     <dl className="company-statistics">{[
@@ -475,7 +487,13 @@ function CompanyHeader({ study, quote, quoteStatus }: { study: Study; quote: Mar
   </header>;
 }
 
-export default function StudyPage({ study, onBack, onRefresh }: { study: Study; onBack: () => void; onRefresh: () => void }) {
+export default function StudyPage({ study, onBack, onRefresh, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails, fundamentalsStatus = 'idle', fundamentalsError, onRetryFundamentals }: {
+  study: Study; onBack: () => void; onRefresh: () => void;
+  fundamentalsStatus?: 'idle' | 'loading' | 'error'; fundamentalsError?: string | null; onRetryFundamentals?: () => void;
+  onFundamentalsReady?: (id: string) => void; detailsStatus?: 'idle' | 'loading' | 'error'; onRetryDetails?: () => void;
+}) {
+  useEffect(() => { onFundamentalsReady?.(study.id); }, [study.id, onFundamentalsReady]);
+  const pending = fundamentalsStatus !== 'idle';
   const tabs = [{ key: 'fundamentals', label: 'Analyzing Fundamentals' }, { key: 'valuation', label: 'Valuation' }, { key: 'news', label: 'Recent News' }] as const;
   const [tab, setTab] = useState<(typeof tabs)[number]['key']>('fundamentals');
   const [forecastsByStudy, setForecastsByStudy] = useState<Record<string, FinancialForecasts>>({});
@@ -509,7 +527,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
   const latestEPS = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).filter(row => row.eps !== null && !isValueExcluded(controls, 'eps', reportingYear(row, reportingYearOffset(annual)))).at(-1)?.eps ?? null;
   const highEPSForecast = fiveYearEstimate(latestEPS, forecasts.eps);
   const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);
-  return <main className="study-page">
+  return <main className="study-page" aria-busy={fundamentalsStatus === 'loading'}>
     <nav className="study-nav" aria-label="Study navigation"><button className="back-button" onClick={onBack}>← Company search</button><div className="study-tabs" role="tablist" aria-label="Study sections">{tabs.map(item => <button key={item.key} id={`tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls={`panel-${item.key}`} tabIndex={tab === item.key ? 0 : -1} onClick={() => setTab(item.key)} onKeyDown={event => {
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
         event.preventDefault();
@@ -518,14 +536,16 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
         setTab(next);
         document.getElementById(`tab-${next}`)?.focus();
       }
-    }}>{item.label}</button>)}</div><div className="study-header-actions"><a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a><button className="primary-button" onClick={onRefresh}>↻ Refresh study</button></div></nav>
-    <CompanyHeader study={study} quote={quote} quoteStatus={quoteStatus}/>
+    }}>{item.label}</button>)}</div><div className="study-header-actions">{pending ? <span className="export-button" aria-disabled="true">Export JSON ↓</span> : <a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a>}<button className="primary-button" disabled={fundamentalsStatus === 'loading'} onClick={onRefresh}>↻ Refresh study</button></div></nav>
+    <CompanyHeader study={study} quote={quote} quoteStatus={quoteStatus} pending={pending}/>
+    {fundamentalsStatus === 'error' && <aside className="study-background-status" role="alert">{fundamentalsError ?? 'Financial data could not be loaded.'} <button type="button" className="text-button" onClick={onRetryFundamentals}>Retry</button></aside>}
+    {detailsStatus === 'error' && <aside className="study-background-status" role="alert">Additional study data could not be loaded. Your fundamentals remain available. <button type="button" className="text-button" onClick={onRetryDetails}>Retry</button></aside>}
     {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={onRefresh}>Retry both sources</button>}</aside>}
-    {!study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
+    {!pending && !study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>
-      <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
-      <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls} forecasts={forecasts} onForecastChange={updateForecast}/>
-      <ManagementTable key={`management-${study.id}`} annual={annual}/>
+      <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} pending={pending} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
+      <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls} pending={pending} forecasts={forecasts} onForecastChange={updateForecast}/>
+      <ManagementTable key={`management-${study.id}`} annual={annual} pending={pending}/>
     </div>
     <div id="panel-valuation" role="tabpanel" aria-labelledby="tab-valuation" hidden={tab !== 'valuation'}><ValuationPage key={`valuation-${study.id}`} study={study} annual={annual} quote={quote} controls={controls} highEPSForecast={highEPSForecast} epsForecastRate={forecasts.eps} onEditEPSForecast={() => { setTab('fundamentals'); window.requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Earnings per share annual forecast percentage"]')?.focus()); }}/></div>
     <div id="panel-news" role="tabpanel" aria-labelledby="tab-news" hidden={tab !== 'news'}><NewsPage key={study.company.ticker} ticker={study.company.ticker} active={tab === 'news'}/></div>
