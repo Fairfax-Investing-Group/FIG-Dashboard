@@ -934,7 +934,7 @@ body {
     display:flex;
     flex-direction:column;
     justify-content:center;
-    gap:6px;
+    gap:4px;
     height:auto;
     max-height:none;
     min-height:0;
@@ -942,18 +942,20 @@ body {
     overflow:visible;
     align-self:center;
   }
-  .home-login-form .home-login-fields { grid-template-columns:minmax(0,1fr); grid-template-rows:none; gap:5px; }
-  .home-login-form .home-login-fields input { height:24px; min-height:24px; padding:4px 7px; font-size:9px; }
+  .home-login-form h2 { font-size:10px; }
+  .home-login-form .home-login-fields { grid-template-columns:minmax(0,1fr); grid-template-rows:none; gap:3px; }
+  .home-login-form .home-login-fields input { height:21px; min-height:21px; padding:3px 6px; font-size:8px; }
   .home-login-form .home-login-actions { min-height:0; white-space:normal; }
-  .home-login-form .home-login-actions button { padding:5px 9px; font-size:10px; }
+  .home-login-form .home-login-actions button { padding:3px 7px; font-size:8px; }
 }
 @media(max-width:800px) {
   .home-account { grid-template-rows:88px; align-items:center; }
   .home-account .home-brand { position:relative; height:88px; align-self:center; }
   .home-account .home-brand-logo { position:static; width:60px; height:88px; object-fit:contain; border-radius:4px; }
-  .home-login-form { display:flex; flex-direction:column; gap:6px; height:auto; max-height:none; min-height:0; padding:0; overflow:visible; align-self:center; }
-  .home-login-form .home-login-fields { grid-template-columns:minmax(0,1fr); grid-template-rows:none; gap:5px; }
-  .home-login-form .home-login-fields input { height:28px; min-height:28px; padding:5px 7px; font-size:10px; }
+  .home-login-form { display:flex; flex-direction:column; gap:4px; height:auto; max-height:none; min-height:0; padding:0; overflow:visible; align-self:center; }
+  .home-login-form h2 { font-size:9px; }
+  .home-login-form .home-login-fields { grid-template-columns:minmax(0,1fr); grid-template-rows:none; gap:3px; }
+  .home-login-form .home-login-fields input { height:24px; min-height:24px; padding:4px 6px; font-size:9px; }
   .home-login-form .home-login-actions { min-height:0; white-space:normal; }
-  .home-login-form .home-login-actions button { padding:6px 10px; font-size:10px; }
+  .home-login-form .home-login-actions button { padding:4px 8px; font-size:9px; }
 }
