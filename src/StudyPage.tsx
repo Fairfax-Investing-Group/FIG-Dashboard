@@ -47,6 +47,12 @@ type HoverLine = {
 type HoveredObservation = { id: ChartLineId; timestamp: number; clientX: number; clientY: number };
 type PointerPosition = { svg: SVGSVGElement; clientX: number; clientY: number };
 
+function SeriesGridLine({ x1, x2, y1, y2, labels }: { x1?: number | string; x2?: number | string; y1?: number | string; y2?: number | string; labels: { key: ChartKey; value: number }[] }) {
+  const yScale = useYAxisScale();
+  const label = labels.find(label => Math.abs((yScale?.(label.value) ?? NaN) - Number(y1)) < 0.1);
+  return <line className={label ? `draggable-series-${label.key}` : undefined} x1={x1} x2={x2} y1={y1} y2={y2} stroke="#e8edf0"/>;
+}
+
 function LineHoverLayer({ lines, onSelect, onMove }: { lines: HoverLine[]; onSelect: (id: ChartLineId) => void; onMove: (key: ChartKey, delta: number) => void }) {
   const area = usePlotArea();
   const xScale = useXAxisScale(), yScale = useYAxisScale(), xInverse = useXAxisInverseScale();
@@ -121,7 +127,10 @@ function LineHoverLayer({ lines, onSelect, onMove }: { lines: HoverLine[]; onSel
     suppressClick.current = false;
     const key = hit.id.split(':')[0] as ChartKey;
     const ys = targets.filter(line => line.id.startsWith(`${key}:`)).flatMap(line => line.pixels.flatMap(point => point ? [point.y] : []));
-    drag.current = { key, startY: pointer.clientY, delta: 0, min: Math.min(0, area.y - Math.min(...ys)), max: Math.max(0, area.y + area.height - Math.max(...ys)), elements: [...pointer.svg.querySelectorAll<SVGElement>(`.draggable-series-${key}`)] };
+    drag.current = { key, startY: pointer.clientY, delta: 0, min: Math.min(0, area.y - Math.min(...ys)), max: Math.max(0, area.y + area.height - Math.max(...ys)), elements: [...new Set([...pointer.svg.querySelectorAll<SVGElement>(`.draggable-series-${key}`)].map(element =>
+      // Recharts portals dots separately from curves. Move the whole dots and
+      // axis-tick groups, including the label and its tick mark.
+      element.closest<SVGElement>('.recharts-line-dots, .recharts-cartesian-axis-tick') ?? element))] };
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragging(true);
   }
@@ -257,7 +266,7 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
   const axisNames: Record<ChartKey, string> = { sales: 'Sales', eps: 'EPS', pretaxProfit: 'Pre-tax profit', close: 'Stock price' };
   const axisLabels = spaced.filter(metric => visibleLines.some(line => line.key === metric.key)).flatMap(metric => {
     const first = metric.data.find(point => point[metric.key] != null);
-    return first ? [{ value: first[metric.key]!, name: axisNames[metric.key], color: metric.color }] : [];
+    return first ? [{ key: metric.key, value: first[metric.key]!, name: axisNames[metric.key], color: metric.color }] : [];
   });
   return <section className="chart-card overlay-chart" aria-label="Combined historical chart">
     <div className="chart-heading overlay-heading"><div><span className="chart-eyebrow">THE LONG VIEW</span><h2>Growth & market performance</h2><p>Sales, earnings and price on one timeline.</p></div><div className="chart-controls"><span className="chart-period">{firstYear} — {lastYear}</span></div></div>
@@ -277,14 +286,14 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     <div className="line-inspector-status" role="status">{selectedLine ? <><i style={{ background: selectedLine.color }}/><strong>{selectedLine.name}</strong><span>{chartDate(selectedLine.observations[0].timestamp)} – {chartDate(selectedLine.observations.at(-1)!.timestamp)} · Hover for yearly actuals or smooth fitted values</span></> : 'Drag a line vertically to reposition it. Hover for its value; regression hovers follow the cursor smoothly. Click to select; toggle Actual and Regression independently.'}</div>
     <div className="plot-meta"><span>TREND COMPARISON</span><span>Logarithmic scales{usesSymlog ? ' · Symmetric log for zero or losses' : ''}</span></div>
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 24, right: 24, bottom: 12, left: 0 }} accessibilityLayer>
-      <CartesianGrid vertical horizontal stroke="#e8edf0" syncWithTicks/>
+      <CartesianGrid vertical horizontal={props => <SeriesGridLine x1={props.x1} x2={props.x2} y1={props.y1} y2={props.y2} labels={axisLabels}/>} stroke="#e8edf0" syncWithTicks/>
       <XAxis dataKey="timestamp" type="number" scale="time" domain={[Date.UTC(firstYear, 0, 1), Date.UTC(lastYear, 11, 31)]} ticks={yearTicks} tickFormatter={value => String(new Date(Number(value)).getUTCFullYear())} tick={{ fontSize: 12, fill: '#7c8793', fontWeight: 500 }} tickLine={false} axisLine={false} minTickGap={30} dy={12}/>
-      <YAxis domain={domain} type="number" scale="linear" width={84} ticks={axisLabels.map(label => label.value)} interval={0} axisLine={{ stroke: '#e1e7e4' }} tickLine={{ stroke: '#d3ddd6' }} allowDataOverflow tick={({ x, y, payload }) => {
+      <YAxis domain={domain} type="number" scale="linear" width={84} ticks={axisLabels.map(label => label.value)} interval={0} axisLine={{ stroke: '#e1e7e4' }} tickLine={false} allowDataOverflow tick={({ x, y, payload }) => {
         const label = axisLabels.find(item => item.value === Number(payload.value));
-        return <text className={`draggable-series-${spaced.find(metric => axisNames[metric.key] === label?.name)?.key}`} x={Number(x) - 7} y={Number(y)} dy={4} textAnchor="end" fill={label?.color} fontSize={10} fontWeight={500}>{label?.name}</text>;
+        return <g className={`draggable-series-${label?.key}`}><line x1={Number(x)} x2={Number(x) + 6} y1={Number(y)} y2={Number(y)} stroke="#d3ddd6"/><text x={Number(x) - 7} y={Number(y)} dy={4} textAnchor="end" fill={label?.color} fontSize={10} fontWeight={500}>{label?.name}</text></g>;
       }}/>
       {spaced.filter(metric => metric.key !== 'close' && lineVisible(`${metric.key}:fit`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={selected === `${metric.key}:fit` ? 3 : 2} strokeOpacity={selected === `${metric.key}:fit` ? 0.65 : 0.4} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:fit` as ChartLineId)}/>)}
-      {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={selected === `${metric.key}:actual` ? 3.5 : metric.key === 'close' ? 1.6 : 3} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : { r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color }} activeDot={false} connectNulls={false} isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:actual`)}/>)}
+      {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={selected === `${metric.key}:actual` ? 3.5 : metric.key === 'close' ? 1.6 : 3} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : { className: `draggable-series-${metric.key}`, r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color }} activeDot={false} connectNulls={false} isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:actual`)}/>)}
       <LineHoverLayer lines={hoverLines} onSelect={setSelected} onMove={(key, delta) => setOffsets(current => ({ ...current, [key]: (current[key] ?? 0) + delta }))}/>
     </LineChart></ResponsiveContainer></div> : <div className="chart-empty">{lines.length ? 'All lines are hidden. Choose Show all to restore the chart.' : 'No comparable history is available. Refresh to try again.'}</div>}
     <div className="chart-footnote"><span className="split-status"><i/>Split-normalized EPS & price</span><span>Translucent lines: log-linear regression · Annual financials · Daily closing prices</span></div>
