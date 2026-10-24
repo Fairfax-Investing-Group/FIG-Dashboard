@@ -17,6 +17,30 @@ def payload(revenue=None, eps=None, pretax=None):
 
 
 class FinancialsTests(unittest.TestCase):
+    def test_foreign_issuer_full_year_6k_restores_missing_annual_period(self):
+        data = payload(revenue=[fact(start='2022-02-01', end='2023-01-31', value=486014000, form='6-K', filed='2025-03-06')],
+                       eps=[fact(start='2022-02-01', end='2023-01-31', value=1.18, form='6-K', filed='2025-03-06')])
+        rows = normalize_financials(data, date(2026, 10, 23))['annual']
+        self.assertEqual(rows[0]['sales'], 486014000)
+        self.assertEqual(rows[0]['eps'], 1.18)
+        self.assertEqual(rows[0]['epsSource']['form'], '6-K')
+
+    def test_6k_quarters_and_ytd_are_not_annual_observations(self):
+        data = payload(revenue=[fact(start='2022-02-01', end=end, form='6-K') for end in ['2022-04-30', '2022-07-31', '2022-10-31']])
+        self.assertEqual(normalize_financials(data)['annual'], [])
+
+    def test_annual_report_precedes_newer_6k_and_53_week_year_is_accepted(self):
+        data = payload(revenue=[fact(value=100), fact(value=999, form='6-K', filed='2025-02-01')],
+                       eps=[fact(start='2022-01-30', end='2023-02-04', value=2, form='6-K/A')])
+        rows = normalize_financials(data)['annual']
+        self.assertEqual(rows[-1]['sales'], 100)
+        self.assertEqual(rows[0]['eps'], 2)
+
+    def test_internal_missing_year_is_explicit_even_with_ten_observations(self):
+        data = payload(revenue=[fact(start=f'{year}-01-01', end=f'{year}-12-31', filed=f'{year+1}-02-01') for year in range(2015, 2026) if year != 2022])
+        result = normalize_financials(data, date(2026, 10, 23))
+        self.assertTrue(any('Annual reporting gap' in warning for warning in result['warnings']))
+
     def test_quarters_ytd_future_and_nonfinite_are_not_full_years(self):
         data = payload(revenue=[
             fact(), fact(end='2023-03-31', value=25), fact(end='2023-09-30', value=75),

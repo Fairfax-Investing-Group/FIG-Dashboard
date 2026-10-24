@@ -5,7 +5,7 @@ import type { AnnualRow, MarketQuote, Metric, Study } from './types';
 import { annualGrowth, fiveYearAverage, fiveYearEstimate, logLinearRegression } from './financialMath';
 import { nearestChartLine, nearestObservation, interpolatedObservation } from './chartInteraction';
 import { trailingFinancials } from './trailingFinancials';
-import { reportingYear, reportingYearOffset } from './reportingYears';
+import { FIRST_HISTORY_YEAR, reportingYear, reportingYearOffset } from './reportingYears';
 import ValuationPage from './ValuationPage';
 import { ExclusionYear, ExclusionValue, ExclusionHelp, isValueExcluded, metricExcludedYears, valueId, type TableExclusions } from './ExclusionControls';
 
@@ -200,7 +200,7 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
     sales: row.sales, eps: study.epsAdjustment?.status === 'normalized' && row.epsSplitFactor != null && row.epsSplitFactor > 0 ? row.eps : null,
     pretaxProfit: row.pretaxProfit, bookValuePerShare: row.bookValuePerShare ?? null, freeCashFlowPerShare: row.freeCashFlowPerShare ?? null,
   })) : [];
-  const prices: ChartPoint[] = study.prices.map(point => ({ timestamp: timestamp(point.date), close: point.close }));
+  const prices: ChartPoint[] = study.prices.filter(point => Number(point.date.slice(0, 4)) >= FIRST_HISTORY_YEAR).map(point => ({ timestamp: timestamp(point.date), close: point.close }));
   const points = new Map<number, ChartPoint>();
   for (const point of [...financials, ...quarters, ...prices]) points.set(point.timestamp, { ...points.get(point.timestamp), ...point });
   const timeline = [...points.values()].sort((a, b) => a.timestamp - b.timestamp);
@@ -500,7 +500,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
     return () => { document.title = 'Stock Search'; };
   }, [study.company.ticker]);
   const normalized = study.epsAdjustment?.status === 'normalized';
-  const annual = study.annual.map(row => ({
+  const annual = study.annual.filter(row => reportingYear(row, reportingYearOffset(study.annual)) >= FIRST_HISTORY_YEAR).map(row => ({
     ...row,
     eps: normalized && row.epsSplitFactor != null && Number.isFinite(row.epsSplitFactor) && row.epsSplitFactor > 0 ? row.eps : null,
   }));

@@ -1,6 +1,6 @@
 import type { AnnualRow, MarketQuote, Study } from './types';
 import { trailingFinancials } from './trailingFinancials';
-import { reportingYear, reportingYearOffset } from './reportingYears';
+import { FIRST_HISTORY_YEAR, reportingYear, reportingYearOffset } from './reportingYears';
 
 export type ValuationRow = {
   year: number; periodEnd: string | null;
@@ -18,8 +18,9 @@ export function valuationRows(annual: AnnualRow[], compatibleCurrencies: boolean
   const offset = reportingYearOffset(annual);
   const yearOf = (row: AnnualRow) => reportingYear(row, offset);
   const last = Math.max(...annual.map(yearOf));
-  return Array.from({ length: years }, (_, index) => {
-    const year = last - years + 1 + index;
+  const first = Math.max(FIRST_HISTORY_YEAR, last - years + 1);
+  return Array.from({ length: Math.max(0, last - first + 1) }, (_, index) => {
+    const year = first + index;
     const row = annual.find(row => yearOf(row) === year);
     const high = finiteValue(row?.highPrice), low = finiteValue(row?.lowPrice), eps = finiteValue(row?.eps), dividend = finiteValue(row?.dividendPerShare);
     return { year, periodEnd: row?.periodEnd ?? null, high, low, eps, dividend,

@@ -31,6 +31,29 @@ def statement(values, sources=None):
 
 
 class FundamentalsTests(unittest.TestCase):
+    def test_full_year_6k_flows_through_annual_statements_and_normalized_record(self):
+        from server.financials import normalize_financials
+        data = payload()
+        for tag, value, unit in [
+            ('RevenueFromContractWithCustomerIncludingAssessedTax', 486014000, 'USD'),
+            ('EarningsPerShareDiluted', 1.18, 'USD/shares'),
+            ('IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest', 133728000, 'USD'),
+            ('NetCashProvidedByUsedInOperatingActivities', 192395000, 'USD'),
+            ('PaymentsToAcquirePropertyPlantAndEquipment', 6071000, 'USD'),
+            ('WeightedAverageNumberOfDilutedSharesOutstanding', 86451000, 'shares'),
+        ]:
+            put(data, tag, [fact(value, start='2022-02-01', end='2023-01-31', form='6-K', filed='2025-03-06')], unit)
+        annual = normalize_financials(data, date(2026, 10, 23))['annual']
+        extracted = extract_statements(data, 'USD', annual, date(2026, 10, 23))['annual']['2023-01-31']
+        adjusted = adjust_statement(extracted, [], '2026-10-23', '2016-01-01')
+        record = statement_record(adjusted, [], 'USD', 'USD')
+        self.assertEqual(record['Sales'], 486.014)
+        self.assertEqual(record['EPS'], 1.18)
+        self.assertEqual(record['PTP'], 133.728)
+        self.assertAlmostEqual(record['CashFlow'], 2.1552555783)
+        self.assertEqual(record['Sources']['EPS']['Form'], '6-K')
+        self.assertEqual(record['EPSSplitFactor'], 1)
+
     def test_missing_interim_periods_are_added_without_overwriting_sec_values(self):
         end = '2026-04-30'
         supplemental = {'Values': {'Sales': 30e6, 'PTP': 6e6, 'OperatingCashFlow': 5e6, 'CapitalExpenditures': 1e6, 'CommonStockEquity': 60e6},

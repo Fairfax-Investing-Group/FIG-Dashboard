@@ -26,6 +26,7 @@ CONCEPTS = {
     ],
 }
 ANNUAL_FORMS = {'10-K', '10-K/A', '20-F', '20-F/A', '40-F', '40-F/A'}
+ANNUAL_FALLBACK_FORMS = {'6-K', '6-K/A'}
 
 
 def annual_facts(payload: dict, metric: str, today: date) -> list:
@@ -43,7 +44,7 @@ def annual_facts(payload: dict, metric: str, today: date) -> list:
                 except (KeyError, ValueError, TypeError):
                     continue
                 # Quarterly and YTD facts must never become annual chart points.
-                if fact.get('form') not in ANNUAL_FORMS or not 330 <= (end - start).days <= 380:
+                if fact.get('form') not in ANNUAL_FORMS | ANNUAL_FALLBACK_FORMS or not 330 <= (end - start).days <= 380:
                     continue
                 if end > today or filed > today or not math.isfinite(value):
                     continue
@@ -51,6 +52,7 @@ def annual_facts(payload: dict, metric: str, today: date) -> list:
                     'start': str(start), 'end': str(end), 'value': value, 'unit': unit,
                     'filed': str(filed), 'accession': fact.get('accn'),
                     'concept': f'{taxonomy}:{concept}', 'priority': priority,
+                    'form': fact['form'], 'formPriority': int(fact['form'] not in ANNUAL_FORMS),
                 })
     return result
 
@@ -86,10 +88,10 @@ def normalize_financials(payload: dict, today: date | None = None) -> dict:
         for metric, facts in candidates.items():
             matching = [item for item in facts if abs((date.fromisoformat(item['end']) - date.fromisoformat(end)).days) <= 7]
             # Prefer concept semantics; within that concept select the newest restatement.
-            matching.sort(key=lambda item: (item['priority'], -date.fromisoformat(item['filed']).toordinal(), -date.fromisoformat(item['start']).toordinal()))
+            matching.sort(key=lambda item: (item['formPriority'], item['priority'], -date.fromisoformat(item['filed']).toordinal(), -date.fromisoformat(item['start']).toordinal()))
             chosen = matching[0] if matching else None
             row[metric] = chosen['value'] if chosen else None
-            row[f'{metric}Source'] = {k: chosen[k] for k in ('concept', 'filed', 'accession', 'unit', 'start', 'end')} if chosen else None
+            row[f'{metric}Source'] = {k: chosen[k] for k in ('concept', 'filed', 'accession', 'unit', 'start', 'end', 'form')} if chosen else None
         rows.append(row)
     warnings = []
     if len(currencies) > 1:
@@ -98,6 +100,9 @@ def normalize_financials(payload: dict, today: date | None = None) -> dict:
         warnings.append('No supported full-year financial facts were found in SEC Company Facts.')
     elif len(rows) < 10:
         warnings.append(f'SEC provides {len(rows)} full-year periods for the supported financial concepts; a full decade is unavailable.')
+    for previous, current in zip(rows, rows[1:]):
+        if (date.fromisoformat(current['periodEnd']) - date.fromisoformat(previous['periodEnd'])).days > 550:
+            warnings.append(f'Annual reporting gap between {previous["periodEnd"]} and {current["periodEnd"]}. No supported full-year facts were found for the intervening period; values are not estimated.')
     for metric, label in [('sales', 'Sales'), ('eps', 'Diluted EPS'), ('pretaxProfit', 'Pre-tax profit')]:
         missing = sum(row[metric] is None for row in rows)
         if missing:

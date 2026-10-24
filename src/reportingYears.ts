@@ -1,5 +1,7 @@
 import type { AnnualRow } from './types';
 
+export const FIRST_HISTORY_YEAR = 2016;
+
 /** Early-year fiscal closes (for example January 2026) primarily cover
  * the previous calendar year. Keep source fiscal years and dates unchanged.
  */
