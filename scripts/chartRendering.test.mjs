@@ -237,7 +237,7 @@ test('year exclusions update the existing chart without adding or replacing char
     const valuationPanel = document.getElementById('panel-valuation');
     assert.equal(valuationPanel.hidden, false);
     assert.equal(document.getElementById('panel-fundamentals').hidden, true);
-    assert.equal(valuationPanel.querySelectorAll('.valuation-table tbody tr').length, 10);
+    assert.equal(valuationPanel.querySelectorAll('.valuation-table tbody tr').length, 6);
     const latestRow = [...valuationPanel.querySelectorAll('.valuation-table tbody tr')].find(row => row.querySelector('th').textContent === '2021');
     assert.equal(latestRow.querySelectorAll('td')[3].textContent, '17.1');
     await React.act(async () => valuationPanel.querySelector('input[value="5"]').click());
@@ -282,6 +282,8 @@ test('year exclusions update the existing chart without adding or replacing char
     await React.act(async () => { root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: januaryStudy, onBack() {}, onRefresh() {} }))); });
     await React.act(async () => { await new Promise(resolve => window.requestAnimationFrame(resolve)); });
     await React.act(async () => document.getElementById('tab-fundamentals').click());
+    assert.equal(document.querySelector('.year-tick[aria-label*="2015"]'), null);
+    assert.equal(document.querySelector('circle[data-display-year="2015"]'), null);
     const shiftedDot = document.querySelector('circle.draggable-series-sales[data-fiscal-year="2021"]');
     assert.equal(shiftedDot.getAttribute('data-display-year'), '2020');
     const shiftedTick = document.querySelector('.year-tick[aria-label*="2020"]');
@@ -290,6 +292,7 @@ test('year exclusions update the existing chart without adding or replacing char
       const headers = [...document.querySelectorAll(`[aria-labelledby="${section}"] thead th`)].map(cell => cell.textContent);
       assert.ok(headers.includes('2020'));
       assert.ok(!headers.includes('2021'));
+      assert.ok(!headers.includes('2015'));
     }
     assert.equal([...document.querySelectorAll('.valuation-table tbody th')].at(-1).textContent, '2020');
     await React.act(async () => shiftedTick.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));

@@ -2,7 +2,7 @@
 from datetime import date, timedelta
 import math
 
-from server.financials import CONCEPTS
+from server.financials import ANNUAL_FORMS, CONCEPTS
 
 DURATION = {
     'Sales': CONCEPTS['sales'], 'EPS': CONCEPTS['eps'], 'PTP': CONCEPTS['pretaxProfit'],
@@ -119,7 +119,9 @@ def extract_statements(payload, currency, annual, today=None, submissions=None):
         for field, facts in candidates.items():
             matching = [fact for fact in facts if abs((fact['end'] - end).days) <= 7 and (
                 field in INSTANT or (330 <= (fact['end'] - fact['start']).days <= 380 if full_year else 70 <= (fact['end'] - fact['start']).days <= 110))]
-            chosen = select(matching)
+            # Full-year 6-Ks fill gaps; an annual filing remains authoritative.
+            annual_matching = [fact for fact in matching if fact['form'] in ANNUAL_FORMS] if full_year else []
+            chosen = select(annual_matching or matching)
             if chosen:
                 fields[field], sources[field] = chosen['value'], provenance(chosen)
             elif not full_year and field in ADDITIVE:
