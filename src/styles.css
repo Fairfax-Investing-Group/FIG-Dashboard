@@ -906,3 +906,12 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .home-login-form .login-availability { margin:5px 0 0; font-size:9px; line-height:1.4; }
 .signed-in-account p { overflow-wrap:anywhere; font-size:12px; line-height:1.5; margin:8px 0; }
 .home-login-form.signed-in-account p { font-size:10px; }
+
+/* Faint technical grid behind the site content. */
+body {
+  background-color:var(--page-grey);
+  background-image:
+    linear-gradient(rgba(38,74,112,.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(38,74,112,.022) 1px, transparent 1px);
+  background-size:32px 32px;
+}
