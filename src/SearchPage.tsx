@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import SavedStudies from './SavedStudies';
+import type { SavedStudy } from './lib/studyInputs';
 import LoginForm from './auth/LoginForm';
 import logo from './assets/fairfax-logo.png';
 const PortfolioDashboard = lazy(() => import('./PortfolioDashboard'));
@@ -6,7 +8,7 @@ const PortfolioDashboard = lazy(() => import('./PortfolioDashboard'));
 export type Company = { cik: number; name: string; ticker: string; exchange: string | null };
 type Directory = { fields: string[]; data: [number, string, string, string | null][] };
 
-export default function SearchPage({ onSelect, onPreload, onPreparePage }: { onSelect: (company: Company) => void; onPreload?: (company: Company, priority?: number) => void | boolean | Promise<void | boolean>; onPreparePage?: (company: Company | null) => void }) {
+export default function SearchPage({ onSelect, onPreload, onPreparePages }: { onSelect: (company: Company, saved?: SavedStudy) => void; onPreload?: (company: Company, priority?: number) => void | boolean | Promise<void | boolean>; onPreparePages?: (companies: Company[]) => void | Promise<void> }) {
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeMatch, setActiveMatch] = useState(-1);
@@ -54,12 +56,18 @@ export default function SearchPage({ onSelect, onPreload, onPreparePage }: { onS
       .sort((a, b) => rank(a) - rank(b) || a.ticker.localeCompare(b.ticker)).slice(0, 10);
   }, [companies, search]);
 
-  const closest = matches[0];
   useEffect(() => {
-    if (!searchOpen || !search || !closest) { onPreparePage?.(null); return; }
-    const timer = setTimeout(() => onPreparePage?.(closest), 25);
-    return () => clearTimeout(timer);
-  }, [query, closest, searchOpen, onPreparePage]);
+    if (!searchOpen || !search || !matches.length) { void onPreparePages?.([]); return; }
+    let cancelled = false;
+    let remainingTimer: ReturnType<typeof setTimeout> | undefined;
+    const firstTimer = setTimeout(() => {
+      Promise.resolve(onPreparePages?.(matches.slice(0, 1))).then(() => {
+        if (cancelled) return;
+        remainingTimer = setTimeout(() => { void onPreparePages?.(matches.slice(0, 5)); }, 500);
+      }).catch(() => { /* Page warming must never interrupt search. */ });
+    }, 25);
+    return () => { cancelled = true; clearTimeout(firstTimer); clearTimeout(remainingTimer); };
+  }, [query, matches, searchOpen, onPreparePages]);
 
   useEffect(() => {
     if (!searchOpen || !search || !onPreload || !matches.length) return;
@@ -167,6 +175,11 @@ export default function SearchPage({ onSelect, onPreload, onPreparePage }: { onS
         if (company) onSelect(company);
         else { setQuery(ticker); document.getElementById('company-search')?.focus(); }
       }}/></Suspense>
+      <SavedStudies onOpen={saved => {
+        const company = companies.find(item => item.cik === saved.cik && item.ticker === saved.ticker)
+          ?? { cik: saved.cik, ticker: saved.ticker, name: saved.ticker, exchange: null };
+        cancelPreload(); onSelect(company, saved);
+      }}/>
     </main>
   );
 }

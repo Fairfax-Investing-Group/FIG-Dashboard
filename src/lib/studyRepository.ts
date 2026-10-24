@@ -3,27 +3,31 @@ import { getSupabaseClient } from './supabase';
 import type { Database } from './database.types';
 import { validateStudyValues, type NewSavedStudy } from './studyInputs';
 
-// Infrastructure only: no component calls these methods or autosaves yet.
+// Explicit saves only; provider documents never enter this repository.
 export function createStudyRepository(client?: SupabaseClient<Database> | null) {
-  async function authenticated() {
+  async function connection() {
     const db = client === undefined ? await getSupabaseClient() : client;
     if (!db) throw new Error('Study storage is not configured.');
+    return db;
+  }
+  async function authenticated() {
+    const db = await connection();
     const { data, error } = await db.auth.getSession();
     if (error) throw error;
-    if (!data.session?.user) throw new Error('Log in to access saved studies.');
+    if (!data.session?.user) throw new Error('Log in to save or edit studies.');
     // This is a local convenience check; Postgres RLS validates real ownership.
     return { db, userId: data.session.user.id };
   }
   return {
     async list() {
-      const { db, userId } = await authenticated();
-      const { data, error } = await db.from('studies').select('id,ticker,cik,title,created_at,updated_at').eq('user_id', userId).order('updated_at', { ascending: false });
+      const db = await connection();
+      const { data, error } = await db.from('studies').select('id,user_id,ticker,cik,title,study_made_at,created_at,updated_at').order('updated_at', { ascending: false });
       if (error) throw error;
       return data;
     },
     async get(id: string) {
-      const { db, userId } = await authenticated();
-      const { data, error } = await db.from('studies').select('*').eq('id', id).eq('user_id', userId).maybeSingle();
+      const db = await connection();
+      const { data, error } = await db.from('studies').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -37,6 +41,7 @@ export function createStudyRepository(client?: SupabaseClient<Database> | null) 
     },
     async update(id: string, values: Partial<NewSavedStudy>) {
       const input = validateStudyValues(values);
+      delete input.study_made_at; // Creation date is immutable after the first save.
       if (!Object.keys(input).length) throw new Error('No study inputs to update.');
       const { db, userId } = await authenticated();
       const { data, error } = await db.from('studies').update(input).eq('id', id).eq('user_id', userId).select('*').single();

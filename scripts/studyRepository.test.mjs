@@ -21,13 +21,13 @@ test('cloud repository sends only explicit inputs through the authenticated Supa
     });
     const client = { auth: { getSession: async () => ({ data: { session: { user: { id: 'alice' } } }, error: null }) }, from: table => sdk.from(table) };
     const repository = createStudyRepository(client);
-    const input = { ticker: 'AAPL', cik: 320193, eps_growth_percent: 12, manual_low_price: 0, annual_dividend: null, high_pe_years: 5, excluded_values: ['eps:2020', 'eps:2020'] };
+    const input = { study_made_at: '2026-10-20T12:00:00Z', ticker: 'AAPL', cik: 320193, eps_growth_percent: 12, manual_low_price: 0, annual_dividend: null, high_pe_years: 5, excluded_values: ['eps:2020', 'eps:2020'] };
     await repository.create(input);
     assert.deepEqual(JSON.parse(calls[0].body), { ...input, excluded_values: ['eps:2020'] });
     assert.equal(new Headers(calls[0].headers).get('Authorization'), 'Bearer user-session-token');
     assert.match(calls[0].url, /\/rest\/v1\/studies/);
     assert.equal(JSON.parse(calls[0].body).user_id, undefined, 'Postgres assigns ownership');
-    await repository.update('saved-id', { high_pe_years: null, high_pe: 20, notes: 'My assumptions' });
+    await repository.update('saved-id', { high_pe_years: null, high_pe: 20, notes: 'My assumptions', study_made_at: '2026-10-21T12:00:00Z' });
     assert.deepEqual(JSON.parse(calls[1].body), { high_pe_years: null, high_pe: 20, notes: 'My assumptions' });
     assert.match(calls[1].url, /user_id=eq\.alice/);
     assert.match(calls[1].url, /id=eq\.saved-id/);
@@ -35,13 +35,18 @@ test('cloud repository sends only explicit inputs through the authenticated Supa
       { ...input, AnnualData: [] }, { ...input, prices: [] }, { ...input, user_id: 'bob' },
       { ...input, eps_growth_percent: NaN }, { ...input, high_pe: Infinity },
       { ...input, low_price_method: 'unsupported' }, { ...input, high_pe_years: 7 },
-      { ...input, excluded_years: ['2020'] },
+      { ...input, excluded_years: ['2020'] }, { ...input, study_made_at: 'not-a-date' }, { ...input, created_at: '2026-10-20T12:00:00Z' },
     ]) await assert.rejects(repository.create(invalid), /study input/);
     assert.equal(calls.length, 2, 'Invalid inputs must never reach Supabase');
     client.auth.getSession = async () => ({ data: { session: null }, error: null });
-    await assert.rejects(repository.list(), /Log in/);
+    await repository.list();
+    assert.ok(!calls[2].url.includes('user_id='), 'Public lists must not filter to the current owner');
+    await repository.get('saved-id');
+    assert.ok(!calls[3].url.includes('user_id='), 'Public reads must not filter to the current owner');
     await assert.rejects(repository.create(input), /Log in/);
-    assert.equal(calls.length, 2);
+    await assert.rejects(repository.update('saved-id', { notes: 'Anonymous edit' }), /Log in/);
+    await assert.rejects(repository.remove('saved-id'), /Log in/);
+    assert.equal(calls.length, 4);
     await assert.rejects(createStudyRepository(null).list(), /not configured/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

@@ -1,6 +1,6 @@
 import type { NewSavedStudy, SavedStudy } from './studyInputs';
 
-/** Mirrors supabase/migrations/202610240001_user_studies.sql. */
+/** Mirrors the versioned migrations in supabase/migrations/. */
 export type Database = {
   public: {
     Tables: {

@@ -17,13 +17,13 @@ export type StudyUserValues = Partial<Record<keyof typeof numericInputs, number 
   management_excluded_years?: number[]; management_excluded_values?: string[];
 };
 export type StudySelection = { ticker: string; cik: number };
-export type NewSavedStudy = StudySelection & StudyUserValues;
+export type NewSavedStudy = StudySelection & StudyUserValues & { study_made_at?: string };
 export type SavedStudy = StudySelection & Required<StudyUserValues> & {
-  id: string; user_id: string; created_at: string; updated_at: string;
+  id: string; user_id: string; study_made_at: string; created_at: string; updated_at: string;
 };
 
 const arrayInputs = ['excluded_years', 'excluded_values', 'management_excluded_years', 'management_excluded_values'];
-const allowed = new Set([...Object.keys(numericInputs), ...Object.keys(choiceInputs), ...arrayInputs, 'title', 'notes', 'high_pe_years', 'low_pe_years', 'ticker', 'cik']);
+const allowed = new Set([...Object.keys(numericInputs), ...Object.keys(choiceInputs), ...arrayInputs, 'title', 'notes', 'high_pe_years', 'low_pe_years', 'ticker', 'cik', 'study_made_at']);
 
 /** Runtime allowlist: never spread a fetched Study/StudyDocument into a cloud row. */
 export function validateStudyValues(input: unknown): Partial<NewSavedStudy> {
@@ -33,7 +33,8 @@ export function validateStudyValues(input: unknown): Partial<NewSavedStudy> {
     if (!allowed.has(key)) throw new Error(`Unsupported study input: ${key}`);
     if (value === undefined) continue;
     let valid = false;
-    if (key === 'ticker') valid = typeof value === 'string' && /^[A-Z0-9][A-Z0-9.\-]{0,14}$/.test(value);
+    if (key === 'study_made_at') valid = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
+    else if (key === 'ticker') valid = typeof value === 'string' && /^[A-Z0-9][A-Z0-9.\-]{0,14}$/.test(value);
     else if (key === 'cik') valid = typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 9_999_999_999;
     else if (key in numericInputs) valid = value === null || (typeof value === 'number' && Number.isFinite(value) && value >= numericInputs[key as keyof typeof numericInputs]);
     else if (key in choiceInputs) valid = value === null || (typeof value === 'string' && (choiceInputs[key as keyof typeof choiceInputs] as readonly string[]).includes(value));

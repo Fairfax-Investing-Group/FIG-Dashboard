@@ -31,8 +31,10 @@ test('busy preloads retry and a changed query reuses its in-flight request witho
     const busy = new Promise(resolve => { rejectBusy = resolve; });
     const requests = [];
     const prepared = [];
+    let finishMount;
+    const firstMount = new Promise(resolve => { finishMount = resolve; });
     root = createRoot(document.getElementById('root'));
-    await React.act(async () => root.render(React.createElement(SearchPage, { onSelect() {}, onPreparePage(company) { prepared.push(company?.ticker ?? null); }, onPreload(company, priority) {
+    await React.act(async () => root.render(React.createElement(SearchPage, { onSelect() {}, onPreparePages(companies) { prepared.push(companies.map(company => company.ticker)); return companies.length === 1 && companies[0].ticker === 'TEST0' ? firstMount : undefined; }, onPreload(company, priority) {
       requests.push({ ticker: company.ticker, priority });
       return requests.length === 1 ? busy : true;
     } })));
@@ -43,9 +45,9 @@ test('busy preloads retry and a changed query reuses its in-flight request witho
     });
     await type('app');
     assert.equal(requests.length, 1);
-    assert.equal(prepared.at(-1), null, 'Page preparation waits for the debounce');
+    assert.deepEqual(prepared.at(-1), [], 'Page preparation waits for the debounce');
     await React.act(async () => { await delay(40); });
-    assert.equal(prepared.at(-1), 'AAPL');
+    assert.deepEqual(prepared.at(-1), ['AAPL']);
     await type('aapl');
     assert.equal(requests.length, 1, 'The changed query must share a still-running request for the same company');
     await React.act(async () => { rejectBusy(false); await delay(230); });
@@ -57,6 +59,14 @@ test('busy preloads retry and a changed query reuses its in-flight request witho
     await type('test');
     assert.equal(requests.at(-1).ticker, 'TEST0');
     assert.equal(requests.at(-1).priority, 0);
+    await React.act(async () => { await delay(550); });
+    assert.deepEqual(prepared.at(-1), ['TEST0'], 'Secondary pages wait for the first page to mount');
+    await React.act(async () => { finishMount(); });
+    await React.act(async () => { await delay(250); });
+    assert.deepEqual(prepared.at(-1), ['TEST0'], 'Secondary pages wait 500ms after the first mount');
+    await React.act(async () => { await delay(300); });
+    assert.deepEqual(prepared.at(-1), ['TEST0', 'TEST1', 'TEST2', 'TEST3', 'TEST4']);
+    await type('te');
     const count = requests.length;
     const pageCount = prepared.length;
     await React.act(async () => root.unmount()); root = null;
