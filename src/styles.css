@@ -634,6 +634,16 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-panel-heading>span { color:#c1cedd; font-size:9px; }
 .portfolio-panel-heading>button { border:0; padding:0; background:transparent; color:#d5dfeb; font-size:10px; }
 .portfolio-chart { width:100%; height:205px; padding:6px 8px 2px; }
+.portfolio-chart { position:relative; }
+.portfolio-event-marker { cursor:help; outline:none; }
+.portfolio-event-marker circle { r:9px; fill:#eef2f5; stroke:#91a0b2; stroke-width:1; }
+.portfolio-event-marker text { fill:#61758c; font-size:9px; font-weight:700; pointer-events:none; }
+.portfolio-event-marker:hover circle,.portfolio-event-marker:focus circle { fill:#dbe4ec; stroke:#61758c; stroke-width:1.5; }
+.portfolio-event-card { position:absolute; z-index:4; right:12px; bottom:8px; display:grid; gap:3px; width:min(240px,calc(100% - 24px)); padding:7px 25px 7px 9px; border:1px solid #d7dfe7; border-radius:5px; background:rgba(255,255,255,.97); box-shadow:0 3px 12px #24344918; color:#344352; font-size:9px; line-height:1.4; }
+.portfolio-event-card strong { color:#283f56; font-size:9px; }
+.portfolio-event-card small { color:#61758c; font-size:8px; }
+.portfolio-event-close { position:absolute; top:3px; right:5px; width:17px; height:17px; padding:0; border:0; border-radius:3px; background:transparent; color:#61758c; font-size:15px; line-height:1; cursor:pointer; }
+.portfolio-event-close:hover,.portfolio-event-close:focus-visible { background:#eef2f5; color:#283f56; }
 .portfolio-period { display:flex; gap:3px; }
 .portfolio-period button { border:1px solid transparent; border-radius:3px; padding:3px 6px; background:transparent; color:#c1cedd; font-size:9px; }
 .portfolio-period button[aria-pressed=true] { border-color:#8a9eb7; color:white; background:#ffffff15; }
@@ -771,25 +781,27 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-holdings .portfolio-table { table-layout:fixed; min-width:0; font-size:8px; white-space:normal; }
 .portfolio-holdings .portfolio-table td { overflow-wrap:anywhere; }
 .portfolio-holdings .portfolio-table tr>:nth-child(1) { width:4%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(2) { width:11%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(3) { width:6%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(4) { width:4.5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(5) { width:5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(6) { width:4%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(7) { width:5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(8) { width:6%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(9) { width:5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(10) { width:4.5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(11) { width:4%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(12) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(2) { width:9%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(3) { width:5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(4) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(5) { width:4.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(6) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(7) { width:4.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(8) { width:5.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(9) { width:4.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(10) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(11) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(12) { width:3.5%; }
 .portfolio-holdings .portfolio-table tr>:nth-child(13) { width:3.5%; }
 .portfolio-holdings .portfolio-table tr>:nth-child(14) { width:3.5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(15) { width:3.5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(16) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(15) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(16) { width:3.5%; }
 .portfolio-holdings .portfolio-table tr>:nth-child(17) { width:4.5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(18) { width:4.5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(19) { width:4.5%; }
-.portfolio-holdings .portfolio-table tr>:nth-child(20) { width:9%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(18) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(19) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(20) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(21) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(22) { width:9%; }
 .portfolio-holdings .portfolio-table th,.portfolio-holdings .portfolio-table td { padding:3px 2px; }
 .portfolio-holdings .portfolio-company-name { white-space:normal; overflow-wrap:anywhere; }
 .portfolio-holdings .portfolio-purchase-date { min-width:0; }

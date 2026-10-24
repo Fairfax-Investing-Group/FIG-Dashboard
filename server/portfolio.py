@@ -30,7 +30,7 @@ _RETRY_AT = None
 _RUNNING = False
 INDEX_SYMBOLS = {'NASDAQ': '^IXIC', 'S&P 500': '^GSPC', 'DOW JONES': '^DJI', 'RUSSEL 2000': '^RUT'}
 BETA_METHOD = '1y-daily-adjusted-sp500-v2'
-CLASSIFICATION_VERSION = 2
+CLASSIFICATION_VERSION = 3
 
 
 def cache_path():
@@ -155,13 +155,19 @@ def fetch_classification(symbol):
         profile = get_profile(symbol)
         cap = profile.get('marketCap')
         trailing_pe = profile.get('trailingPE')
+        forward_pe = profile.get('forwardPE')
+        free_cash_flow = profile.get('freeCashflow')
         peg_ratio = profile.get('trailingPegRatio')
         if peg_ratio is None:
             peg_ratio = profile.get('pegRatio')
+        valid_cap = cap if isinstance(cap, (int, float)) and math.isfinite(cap) and cap > 0 else None
+        valid_free_cash_flow = free_cash_flow if isinstance(free_cash_flow, (int, float)) and math.isfinite(free_cash_flow) else None
         return {'sector': profile.get('sector') or None,
-                'marketCap': cap if isinstance(cap, (int, float)) and math.isfinite(cap) and cap > 0 else None,
+                'marketCap': valid_cap,
                 'trailingPE': trailing_pe if isinstance(trailing_pe, (int, float)) and math.isfinite(trailing_pe) and trailing_pe > 0 else None,
-                'pegRatio': peg_ratio if isinstance(peg_ratio, (int, float)) and math.isfinite(peg_ratio) else None}
+                'forwardPE': forward_pe if isinstance(forward_pe, (int, float)) and math.isfinite(forward_pe) and forward_pe > 0 else None,
+                'pegRatio': peg_ratio if isinstance(peg_ratio, (int, float)) and math.isfinite(peg_ratio) else None,
+                'freeCashFlowYield': valid_free_cash_flow / valid_cap if valid_free_cash_flow is not None and valid_cap is not None else None}
     except Exception:
         logging.warning('Portfolio classification unavailable for %s', symbol)
         return {}
@@ -274,7 +280,7 @@ def refresh_if_due(now=None):
         previous = {item['ticker']: item for item in (cached or seed)['holdings']}
         for holding in document['holdings']:
             profile = classifications[holding['ticker']]
-            for key in ('sector', 'marketCap', 'trailingPE', 'pegRatio'):
+            for key in ('sector', 'marketCap', 'trailingPE', 'forwardPE', 'pegRatio', 'freeCashFlowYield'):
                 value = profile.get(key)
                 holding[key] = value if value is not None else previous.get(holding['ticker'], {}).get(key)
         document['classificationVersion'] = CLASSIFICATION_VERSION
