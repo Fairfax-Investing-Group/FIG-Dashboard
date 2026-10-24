@@ -72,16 +72,29 @@ test('home company search selects the correct issuer and login opens without a s
     assert.equal(marketSort.querySelector('.portfolio-sort-arrows').textContent, '↑');
     assert.equal(holdingRows()[0].querySelector('.portfolio-history-cell svg').getAttribute('preserveAspectRatio'), 'none');
     assert.match(dashboard.querySelector('.portfolio-risk-box').textContent, /Beta vs. S&P 500/);
-    assert.equal(dashboard.querySelectorAll('.portfolio-risk-box dl>div').length, 8);
+    assert.equal(dashboard.querySelectorAll('.portfolio-risk-box dl>div').length, 6);
+    assert.doesNotMatch(dashboard.querySelector('.portfolio-risk-box').textContent, /Cash weight|Top 5 holdings weight/);
     assert.ok(dashboard.querySelector('#portfolio-diversification-title'));
     assert.equal(dashboard.querySelectorAll('.portfolio-allocation-donut').length, 2);
     const tiles = [...dashboard.querySelectorAll('.portfolio-heatmap rect')];
     assert.equal(tiles.length, portfolioData.holdings.length + 1);
     assert.ok(Math.abs(tiles.reduce((sum, tile) => sum + Number(tile.getAttribute('width')) * Number(tile.getAttribute('height')), 0) - 360 * 190) < 1e-6);
+    const totalValue = portfolioData.summary.cash + portfolioData.holdings.reduce((sum, holding) => sum + holding.marketValue, 0);
+    for (const holding of portfolioData.holdings) {
+      const group = [...dashboard.querySelectorAll('.portfolio-heatmap g[tabindex]')].find(tile => tile.getAttribute('aria-label').startsWith(`${holding.ticker}:`));
+      const rect = group.querySelector('rect');
+      const width = Number(rect.getAttribute('width')), height = Number(rect.getAttribute('height'));
+      assert.ok(Math.abs(width * height / (360 * 190) - holding.marketValue / totalValue) < 1e-10);
+      if (['GOOGL', 'ASTS'].includes(holding.ticker)) {
+        assert.ok(width >= 40, `${holding.ticker} needs room for its label`);
+        assert.ok(height >= 22);
+      }
+    }
     assert.match(dashboard.querySelector('.portfolio-heatmap').textContent, /CASH/);
     assert.equal(dashboard.querySelectorAll('.portfolio-donut-center,.portfolio-donut-caption').length, 0);
     const stockTile = [...dashboard.querySelectorAll('.portfolio-heatmap g[tabindex]')].find(tile => tile.getAttribute('aria-label').startsWith('MSFT:'));
-    assert.equal(stockTile.querySelectorAll('text').length, 1);
+    assert.equal(stockTile.querySelectorAll('text').length, 0);
+    assert.equal(dashboard.querySelectorAll('.portfolio-heatmap-labels span').length, portfolioData.holdings.length + 1);
     await React.act(async () => stockTile.focus());
     assert.match(dashboard.querySelector('.portfolio-heatmap-tooltip').textContent, /Return:.*Purchased: Feb 17, 2026/);
     await React.act(async () => stockTile.dispatchEvent(new window.MouseEvent('mousemove', { clientX: 100, clientY: 50, bubbles: true })));

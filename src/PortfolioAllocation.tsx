@@ -42,12 +42,13 @@ function AllocationDonut({ title, data }: { title: string; data: Allocation[] })
         angle += sweep;
         const end = angle, middle = (start + end) / 2;
         const point = (a: number, radius: number) => [110 + Math.cos(a) * radius, 95 + Math.sin(a) * radius];
-        const [x1, y1] = point(start, 58), [x2, y2] = point(end, 58);
-        const [labelX, labelY] = point(middle, 75);
+        const [x1, y1] = point(start, 75), [x2, y2] = point(end, 75);
+        const [labelX, labelY] = point(middle, 89);
         const right = Math.cos(middle) >= 0;
-        return <g key={item.name} tabIndex={0} role="button" aria-label={`${item.name}: ${percent(item.value / total)}; ${item.companies?.join(', ')}`} onMouseEnter={event => { setActive(item.name); setPosition(tooltipPosition(event.currentTarget, '.portfolio-diversification', event.clientX, event.clientY)); }} onMouseMove={event => setPosition(tooltipPosition(event.currentTarget, '.portfolio-diversification', event.clientX, event.clientY))} onFocus={event => { setActive(item.name); setPosition(tooltipPosition(event.currentTarget, '.portfolio-diversification')); }} onBlur={() => setActive(null)} onKeyDown={event => { if (event.key === 'Escape') setActive(null); }} className="portfolio-pie-slice">
-          {sweep >= Math.PI * 2 - .00001 ? <circle cx="110" cy="95" r="58" fill={blues[index % blues.length]}/> : <path d={`M110,95 L${x1},${y1} A58,58 0 ${sweep > Math.PI ? 1 : 0},1 ${x2},${y2} Z`} fill={blues[index % blues.length]} stroke="#fff" strokeWidth="1.5" opacity={active && active !== item.name ? .35 : 1}/>}
-          <text x={labelX} y={labelY} dominantBaseline="middle" textAnchor={right ? 'start' : 'end'} fill="#325779" fontSize="9">{abbreviations[item.name] || item.name}</text>
+        const tech = title === 'Sector' && item.name === 'Technology';
+        return <g key={item.name} tabIndex={0} role="button" aria-label={`${item.name}: ${percent(item.value / total)}; ${item.companies?.join(', ')}`} onMouseEnter={event => { setActive(item.name); setPosition(tooltipPosition(event.currentTarget, '.portfolio-allocation-donut', event.clientX, event.clientY)); }} onMouseMove={event => setPosition(tooltipPosition(event.currentTarget, '.portfolio-allocation-donut', event.clientX, event.clientY))} onFocus={event => { setActive(item.name); setPosition(tooltipPosition(event.currentTarget, '.portfolio-allocation-donut')); }} onBlur={() => setActive(null)} onKeyDown={event => { if (event.key === 'Escape') setActive(null); }} className="portfolio-pie-slice">
+          {sweep >= Math.PI * 2 - .00001 ? <circle cx="110" cy="95" r="75" fill={blues[index % blues.length]}/> : <path d={`M110,95 L${x1},${y1} A75,75 0 ${sweep > Math.PI ? 1 : 0},1 ${x2},${y2} Z`} fill={blues[index % blues.length]} stroke="#fff" strokeWidth="1.5" opacity={active && active !== item.name ? .35 : 1}/>}
+          <text x={tech ? 110 : labelX} y={tech ? 184 : labelY} dominantBaseline="middle" textAnchor={tech ? 'middle' : right ? 'start' : 'end'} fill="#325779" fontSize="9">{abbreviations[item.name] || item.name}</text>
         </g>;
       })}
     </svg>
@@ -57,15 +58,45 @@ function AllocationDonut({ title, data }: { title: string; data: Allocation[] })
 
 type Tile = Allocation & { change: number | null; cash?: boolean; purchaseDate?: string; x: number; y: number; width: number; height: number };
 export function layoutTiles(items: Omit<Tile, 'x' | 'y' | 'width' | 'height'>[], x = 0, y = 0, width = 360, height = 190): Tile[] {
-  if (!items.length) return [];
-  if (items.length === 1) return [{ ...items[0], x, y, width, height }];
-  const total = items.reduce((sum, item) => sum + item.value, 0);
-  let split = 1, subtotal = items[0].value;
-  while (split < items.length - 1 && Math.abs(subtotal + items[split].value - total / 2) < Math.abs(subtotal - total / 2)) subtotal += items[split++].value;
-  const ratio = subtotal / total;
-  return width >= height
-    ? [...layoutTiles(items.slice(0, split), x, y, width * ratio, height), ...layoutTiles(items.slice(split), x + width * ratio, y, width * (1 - ratio), height)]
-    : [...layoutTiles(items.slice(0, split), x, y, width, height * ratio), ...layoutTiles(items.slice(split), x, y + height * ratio, width, height * (1 - ratio))];
+  const positive = items.filter(item => Number.isFinite(item.value) && item.value > 0).sort((a, b) => b.value - a.value);
+  const total = positive.reduce((sum, item) => sum + item.value, 0);
+  if (!total || width <= 0 || height <= 0) return [];
+  const remaining = positive.map(item => ({ item, area: item.value / total * width * height }));
+  const tiles: Tile[] = [];
+  let left = x, top = y, availableWidth = width, availableHeight = height;
+  const worstAspect = (row: typeof remaining, side: number) => {
+    const sum = row.reduce((value, entry) => value + entry.area, 0);
+    const areas = row.map(entry => entry.area);
+    return Math.max(side ** 2 * Math.max(...areas) / sum ** 2, sum ** 2 / (side ** 2 * Math.min(...areas)));
+  };
+  while (remaining.length) {
+    const side = Math.min(availableWidth, availableHeight);
+    const row = [remaining.shift()!];
+    while (remaining.length && worstAspect([...row, remaining[0]], side) <= worstAspect(row, side)) row.push(remaining.shift()!);
+    const area = row.reduce((sum, entry) => sum + entry.area, 0);
+    if (availableWidth >= availableHeight) {
+      const rowWidth = area / availableHeight;
+      let cursor = top;
+      for (const entry of row) {
+        const tileHeight = entry.area / rowWidth;
+        tiles.push({ ...entry.item, x: left, y: cursor, width: rowWidth, height: tileHeight });
+        cursor += tileHeight;
+      }
+      left += rowWidth;
+      availableWidth -= rowWidth;
+    } else {
+      const rowHeight = area / availableWidth;
+      let cursor = left;
+      for (const entry of row) {
+        const tileWidth = entry.area / rowHeight;
+        tiles.push({ ...entry.item, x: cursor, y: top, width: tileWidth, height: rowHeight });
+        cursor += tileWidth;
+      }
+      top += rowHeight;
+      availableHeight -= rowHeight;
+    }
+  }
+  return tiles;
 }
 
 export default function PortfolioAllocation({ holdings, cash, asOf }: { holdings: Holding[]; cash: number; asOf: string }) {
@@ -74,21 +105,21 @@ export default function PortfolioAllocation({ holdings, cash, asOf }: { holdings
   const sectors = allocationGroups(holdings, item => item.sector || 'Unclassified');
   const sizes = allocationGroups(holdings, item => sizeCategory(item.marketCap));
   const items = [...holdings.map(item => ({ name: item.ticker, value: item.marketValue, purchaseDate: item.purchaseDate, change: Number.isFinite(item.return) ? item.return : null })), { name: 'CASH', value: cash, change: null, cash: true }].filter(item => Number.isFinite(item.value) && item.value > 0).sort((a, b) => b.value - a.value);
+  const tiles = layoutTiles(items);
   return <>
     <section className="portfolio-panel portfolio-diversification" aria-labelledby="portfolio-diversification-title"><div className="portfolio-panel-heading"><h3 id="portfolio-diversification-title">Portfolio diversification</h3><span>{asOf}</span></div>
       <div className="portfolio-allocation-pies"><AllocationDonut title="Sector" data={sectors}/><AllocationDonut title="Size" data={sizes}/></div>
       <p className="portfolio-allocation-note" title="Market capitalization: Mega ≥ $200B; Large $10–200B; Mid $2–10B; Small $300M–2B; Micro < $300M.">Holdings only · weighted by market value</p>
     </section>
     <section className="portfolio-panel portfolio-heatmap" aria-labelledby="portfolio-heatmap-title"><div className="portfolio-panel-heading"><h3 id="portfolio-heatmap-title">Portfolio heatmap</h3><span>{asOf}</span></div>
-      <div className="portfolio-heatmap-body" onMouseLeave={() => setActiveTile(null)}><svg viewBox="0 0 360 190" preserveAspectRatio="none" role="img" aria-label="Portfolio heatmap: tile area shows allocation including cash; blue shade shows return since purchase">
-        {layoutTiles(items).map(tile => {
+      <div className="portfolio-heatmap-body" onMouseLeave={() => setActiveTile(null)}><div className="portfolio-heatmap-plot"><svg viewBox="0 0 360 190" preserveAspectRatio="none" role="img" aria-label="Portfolio heatmap: tile area shows allocation including cash; blue shade shows return since purchase">
+        {tiles.map(tile => {
           const fill = tile.cash ? '#e4eaf0' : tile.change == null ? '#d1dbe5' : tile.change < 0 ? '#cadbea' : tile.change < .15 ? '#7ea8cb' : tile.change < .3 ? '#477eac' : '#204e7c';
-          const color = !tile.cash && tile.change != null && tile.change >= .15 ? '#fff' : '#193f68';
           const purchased = tile.purchaseDate ? new Date(`${tile.purchaseDate}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : 'Unavailable';
-          return <g key={tile.name} tabIndex={0} role="button" aria-label={`${tile.name}${tile.cash ? ': Cash position' : `: ${tile.change == null ? 'Return unavailable' : percent(tile.change) + ' return'}; purchased ${purchased}`}`} onMouseEnter={event => { setActiveTile(tile); setPosition(tooltipPosition(event.currentTarget, '.portfolio-heatmap-body', event.clientX, event.clientY)); }} onMouseMove={event => setPosition(tooltipPosition(event.currentTarget, '.portfolio-heatmap-body', event.clientX, event.clientY))} onFocus={event => { setActiveTile(tile); setPosition(tooltipPosition(event.currentTarget, '.portfolio-heatmap-body')); }} onBlur={() => setActiveTile(null)} onKeyDown={event => { if (event.key === 'Escape') setActiveTile(null); }}><title>{tile.cash ? 'Cash position' : `${tile.name}: ${tile.change == null ? 'Return unavailable' : percent(tile.change) + ' return'} · Purchased ${purchased}`}</title><rect x={tile.x} y={tile.y} width={tile.width} height={tile.height} fill={fill} stroke="#fff" strokeWidth="1.5"/>{tile.width >= 22 && tile.height >= 20 && <text x={tile.x + tile.width / 2} y={tile.y + tile.height / 2} dominantBaseline="middle" textAnchor="middle" fill={color} fontSize={Math.min(11, (tile.width - 5) / (tile.name.length * .65))} fontWeight="600">{tile.name}</text>}</g>;
+          return <g key={tile.name} tabIndex={0} role="button" aria-label={`${tile.name}${tile.cash ? ': Cash position' : `: ${tile.change == null ? 'Return unavailable' : percent(tile.change) + ' return'}; purchased ${purchased}`}`} onMouseEnter={event => { setActiveTile(tile); setPosition(tooltipPosition(event.currentTarget, '.portfolio-heatmap-body', event.clientX, event.clientY)); }} onMouseMove={event => setPosition(tooltipPosition(event.currentTarget, '.portfolio-heatmap-body', event.clientX, event.clientY))} onFocus={event => { setActiveTile(tile); setPosition(tooltipPosition(event.currentTarget, '.portfolio-heatmap-body')); }} onBlur={() => setActiveTile(null)} onKeyDown={event => { if (event.key === 'Escape') setActiveTile(null); }}><title>{tile.cash ? 'Cash position' : `${tile.name}: ${tile.change == null ? 'Return unavailable' : percent(tile.change) + ' return'} · Purchased ${purchased}`}</title><rect x={tile.x} y={tile.y} width={tile.width} height={tile.height} fill={fill} stroke="#fff" strokeWidth="1.5"/></g>;
 
         })}
-      </svg>{activeTile && <div className="portfolio-heatmap-tooltip" role="tooltip" style={position}><strong>{activeTile.name}</strong>{activeTile.cash ? <span>Cash position</span> : <><span>Return: {activeTile.change == null ? 'Unavailable' : percent(activeTile.change)}</span><span>Purchased: {activeTile.purchaseDate ? new Date(`${activeTile.purchaseDate}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : 'Unavailable'}</span></>}</div>}<div className="portfolio-heatmap-legend"><span>Loss</span><i/><span>Higher return</span></div><p className="portfolio-allocation-note">Area: allocation · shade: return since purchase</p></div>
+      </svg><div className="portfolio-heatmap-labels" aria-hidden="true">{tiles.map(tile => <span key={tile.name} style={{ left: `${(tile.x + tile.width / 2) / 360 * 100}%`, top: `${(tile.y + tile.height / 2) / 190 * 100}%`, color: !tile.cash && tile.change != null && tile.change >= .15 ? '#fff' : '#193f68' }}>{tile.name}</span>)}</div></div>{activeTile && <div className="portfolio-heatmap-tooltip" role="tooltip" style={position}><strong>{activeTile.name}</strong>{activeTile.cash ? <span>Cash position</span> : <><span>Return: {activeTile.change == null ? 'Unavailable' : percent(activeTile.change)}</span><span>Purchased: {activeTile.purchaseDate ? new Date(`${activeTile.purchaseDate}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : 'Unavailable'}</span></>}</div>}<div className="portfolio-heatmap-legend"><span>Loss</span><i/><span>Higher return</span></div><p className="portfolio-allocation-note">Area: allocation · shade: return since purchase</p></div>
     </section>
   </>;
 }
