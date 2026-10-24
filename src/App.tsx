@@ -5,6 +5,7 @@ import LoginPage from './LoginPage';
 import StudyPage from './StudyPage';
 import { pendingStudy, unknownPendingStudy, rememberStudyCompany } from './pendingStudy';
 import type { Study, StudyDocument } from './types';
+import { StudyCache } from './studyCache';
 import { readStudyStream } from './studyStream';
 import { studyView } from './studyDocument';
 
@@ -40,8 +41,27 @@ function AppContent() {
   const [detailsStatus, setDetailsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [detailsRetry, setDetailsRetry] = useState(0);
   const fundamentalsReady = useCallback((id: string) => setReadyStudyId(id), []);
-  const cache = useRef(new Map<string, StudyDocument>());
+  const cache = useRef(new StudyCache());
   const request = useRef<AbortController | null>(null);
+  const preloadGroup = useRef<string | null>(null);
+  const [preparedPage, setPreparedPage] = useState<Study | null>(null);
+  const preparePage = useCallback((company: Company | null) => {
+    setPreparedPage(previous => company
+      ? previous?.company.cik === company.cik && previous.company.ticker === company.ticker
+        ? previous : pendingStudy(company, crypto.randomUUID())
+      : null);
+  }, []);
+
+  useEffect(() => {
+    const active = pendingView ?? study;
+    const group = preloadGroup.current;
+    if (!group || !active || readyStudyId !== active.id) return;
+    preloadGroup.current = null;
+    void fetch('/api/studies/preload/clear', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preloadGroup: group, ticker: active.company.ticker, cik: active.company.cik }),
+    }).catch(() => { /* Expiry still clears unused preloads if the server is unreachable. */ });
+  }, [readyStudyId, pendingView?.id, study?.id]);
 
   useEffect(() => {
     const navigate = () => {
@@ -71,7 +91,7 @@ function AppContent() {
     setLoading(true);
     setError(null);
     setPendingView(previous => previous?.id === match[1] ? previous : unknownPendingStudy(match[1]));
-    fetch(`/api/studies/${match[1]}?view=fundamentals`, { signal: controller.signal })
+    fetch(`/api/studies/${match[1]}?view=study`, { signal: controller.signal })
       .then(readResponse)
       .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyView(data).company); setStudyDocument(data); setPendingView(null); })
       .catch(error => { if (!controller.signal.aborted && error.name !== 'AbortError') setError(error.message); })
@@ -87,9 +107,14 @@ function AppContent() {
     if (!studyId || readyStudyId !== studyId || dataStage !== 'fundamentals' || loading || route !== `/study/${studyId}`) return;
     const controller = new AbortController();
     setDetailsStatus('loading');
-    fetch(`/api/studies/${studyId}/complete`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: controller.signal,
-    }).then(readResponse).then(data => {
+    fetch(`/api/studies/${studyId}/complete?view=study`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: '{}', signal: controller.signal,
+    }).then(response => readStudyStream(response, data => {
+      if (!controller.signal.aborted && readRoute() === `/study/${studyId}`) {
+        cache.current.set(studyId, data);
+        setStudyDocument(data);
+      }
+    }, readResponse)).then(data => {
       if (controller.signal.aborted || readRoute() !== `/study/${studyId}`) return;
       cache.current.set(studyId, data);
       setStudyDocument(data);
@@ -100,23 +125,27 @@ function AppContent() {
     return () => controller.abort();
   }, [studyId, dataStage, readyStudyId, loading, route, detailsRetry]);
 
-  function preloadStudy(company: Company) {
-    // This endpoint warms unsaved inputs; creation consumes the same work.
-    void fetch('/api/studies/preload', {
+  function preloadStudy(company: Company, priority = 0): Promise<boolean> {
+    // Scope speculative work to this search so opening a study can discard it.
+    preloadGroup.current ??= crypto.randomUUID();
+    return fetch('/api/studies/preload', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker: company.ticker, cik: company.cik }),
-    }).catch(() => { /* Speculative requests never interrupt search or selection. */ });
+      body: JSON.stringify({ ticker: company.ticker, cik: company.cik, preloadGroup: preloadGroup.current, priority }),
+    }).then(response => response.ok).catch(() => false);
   }
 
   async function createStudy(company: Company, retryId?: string) {
     if (request.current && !request.current.signal.aborted && loading) return;
     const controller = new AbortController();
     request.current = controller;
-    const id = retryId ?? crypto.randomUUID();
+    const prepared = preparedPage?.company.cik === company.cik && preparedPage.company.ticker === company.ticker ? preparedPage : null;
+    const id = retryId ?? prepared?.id ?? crypto.randomUUID();
+    const group = preloadGroup.current;
     const initial = retryId && pendingView?.id === retryId ? pendingView
-      : study && study.company.cik === company.cik ? { ...study, id } : pendingStudy(company, id);
+      : study && study.company.cik === company.cik ? { ...study, id } : prepared ?? pendingStudy(company, id);
     rememberStudyCompany(id, company);
     setPendingView(initial);
+    setPreparedPage(null);
     setStudyDocument(null);
     setPending(company);
     setReadyStudyId(null);
@@ -127,7 +156,7 @@ function AppContent() {
       const data = await fetch('/api/studies?stage=fundamentals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-        body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id }),
+        body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }),
         signal: controller.signal,
       }).then(response => readStudyStream(response, document => {
         if (!controller.signal.aborted) setPendingView(studyView(document));
@@ -153,20 +182,27 @@ function AppContent() {
     setLoading(false);
     setStudyDocument(null);
     setPendingView(null);
+    setPreparedPage(null);
     setRoute('');
     window.location.hash = '';
   }
 
   if (route === '/login') return <LoginPage/>;
   const displayedStudy = pendingView ?? study;
-  if (displayedStudy && (pendingView || route)) return <StudyPage
-    key={displayedStudy.id} study={displayedStudy} onBack={backToSearch}
-    onRefresh={() => createStudy(displayedStudy.company)} onFundamentalsReady={fundamentalsReady}
-    fundamentalsStatus={pendingView ? error ? 'error' : 'loading' : 'idle'}
+  const showingStudy = Boolean(displayedStudy && (pendingView || route));
+  const pageStudy = showingStudy ? displayedStudy : !route ? preparedPage : null;
+  return <>
+  <div hidden={!showingStudy} inert={!showingStudy}>
+  {pageStudy && <StudyPage
+    key={pageStudy.id} study={pageStudy} onBack={backToSearch}
+    onRefresh={() => createStudy(pageStudy.company)} onFundamentalsReady={showingStudy ? fundamentalsReady : undefined}
+    fundamentalsStatus={!showingStudy || pendingView ? error ? 'error' : 'loading' : 'idle'}
     fundamentalsError={error}
     onRetryFundamentals={() => pending ? createStudy(pending, pendingView?.id) : setLoadRetry(value => value + 1)}
     detailsStatus={!pendingView && dataStage === 'fundamentals' ? detailsStatus === 'error' ? 'error' : 'loading' : 'idle'}
-    onRetryDetails={() => setDetailsRetry(value => value + 1)}/>;
-  if (error) return <main className="search-page state-page"><button className="back-button" onClick={backToSearch}>← Back to search</button><div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p></div></main>;
-  return <SearchPage onSelect={createStudy} onPreload={preloadStudy}/>;
+    onRetryDetails={() => setDetailsRetry(value => value + 1)}/>}
+  </div>
+  {!showingStudy && (error ? <main className="search-page state-page"><button className="back-button" onClick={backToSearch}>← Back to search</button><div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p></div></main>
+    : <SearchPage onSelect={createStudy} onPreload={preloadStudy} onPreparePage={preparePage}/>)}
+  </>;
 }

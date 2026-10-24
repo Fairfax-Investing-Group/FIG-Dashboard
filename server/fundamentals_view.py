@@ -34,3 +34,18 @@ def fundamentals_view(document):
             'EPSAdjustment': {**{key: value for key, value in metadata['EPSAdjustment'].items() if key != 'Events'}, 'Events': []},
         },
     }
+
+
+# All fields consumed by the chart, Fundamentals and Valuation. Export remains
+# canonical and retains peers, full provenance, coverage and unused statements.
+VALUATION_FIELDS = ('HighPrice', 'LowPrice', 'HighPE', 'LowPE', 'Dividend')
+
+
+def study_view(document):
+    result = fundamentals_view(document)
+    result['Metadata']['ResponseView'] = 'study'
+    result['Company']['Dividend'] = document['Company'].get('Dividend')
+    for section in ('AnnualData', 'QuarterlyData'):
+        for row, original in zip(result[section], document.get(section, [])):
+            row.update({key: original.get(key) for key in VALUATION_FIELDS})
+    return result

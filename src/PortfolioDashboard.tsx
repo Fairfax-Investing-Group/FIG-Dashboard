@@ -82,9 +82,9 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
   const [partnerName, setPartnerName] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: 'marketValue' | 'gain' | 'return'; descending: boolean }>({ key: 'gain', descending: true });
   const summary = portfolio.summary;
-  const sharpe = portfolioSharpe(portfolio.performance);
-  const risk = portfolioRiskMetrics(portfolio.performance);
-  const dailyChange = portfolioDayChange(portfolio.holdings, summary.cash);
+  const sharpe = useMemo(() => portfolioSharpe(portfolio.performance), [portfolio.performance]);
+  const risk = useMemo(() => portfolioRiskMetrics(portfolio.performance), [portfolio.performance]);
+  const dailyChange = useMemo(() => portfolioDayChange(portfolio.holdings, summary.cash), [portfolio.holdings, summary.cash]);
   const rankedHoldings = [...portfolio.holdings].filter(item => Number.isFinite(item.return)).sort((a, b) => b.return - a.return);
   const bestHolding = rankedHoldings[0];
   const lowestHolding = rankedHoldings.at(-1);

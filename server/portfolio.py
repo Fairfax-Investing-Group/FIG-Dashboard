@@ -1,6 +1,7 @@
 """Persistent end-of-day portfolio updates; workbook transactions remain the source of truth."""
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from hashlib import sha256
@@ -14,6 +15,8 @@ from zoneinfo import ZoneInfo
 
 import pandas_market_calendars as mcal
 import yfinance as yf
+
+from server.yahoo_profile import get_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = ROOT / 'src/data/portfolio.json'
@@ -38,24 +41,44 @@ def session_schedule(year):
     return mcal.get_calendar('NYSE').schedule(start_date=f'{year - 1}-12-15', end_date=f'{year + 1}-01-15')
 
 
+_SCHEDULE_TIMES = {}
+
+
 def refresh_window(now):
-    """Most recent eligible trading session and the next scheduled update, in UTC."""
-    local = now.astimezone(EASTERN)
-    schedule = session_schedule(local.year)
-    ready = [(index.date().isoformat(), row['market_close'].to_pydatetime() + UPDATE_DELAY) for index, row in schedule.iterrows()]
-    previous = [session for session, due in ready if due <= now]
-    upcoming = [due for _, due in ready if due > now]
-    return previous[-1] if previous else None, upcoming[0] if upcoming else None
+    """Most recent eligible trading session and next update, without reparsing rows."""
+    year = now.astimezone(EASTERN).year
+    schedule = session_schedule(year)
+    with _LOCK:
+        cached = _SCHEDULE_TIMES.get(year)
+        if cached is None or cached[0] is not schedule:
+            ready = [(index.date().isoformat(), row['market_close'].to_pydatetime() + UPDATE_DELAY) for index, row in schedule.iterrows()]
+            cached = (schedule, ready, [due for _, due in ready])
+            if len(_SCHEDULE_TIMES) >= 4:
+                _SCHEDULE_TIMES.pop(next(iter(_SCHEDULE_TIMES)))
+            _SCHEDULE_TIMES[year] = cached
+    _, ready, due = cached
+    index = bisect_right(due, now)
+    return ready[index - 1][0] if index else None, due[index] if index < len(due) else None
+
+
+@lru_cache(maxsize=4)
+def _read_json(path, modified, size):
+    raw = Path(path).read_bytes()
+    return json.loads(raw), sha256(raw).hexdigest()
+
+
+def read_json(path):
+    stat = path.stat()
+    return _read_json(str(path), stat.st_mtime_ns, stat.st_size)
 
 
 def load_seed():
-    raw = SEED.read_bytes()
-    return json.loads(raw), sha256(raw).hexdigest()
+    return read_json(SEED)
 
 
 def read_cache(fingerprint):
     try:
-        document = json.loads(cache_path().read_text())
+        document = read_json(cache_path())[0]
         if document.get('seedFingerprint') == fingerprint:
             return document
     except (OSError, ValueError):
@@ -114,7 +137,7 @@ def stock_beta(history, benchmark, session):
 def fetch_classification(symbol):
     """Classification failure should not prevent the daily price update."""
     try:
-        profile = yf.Ticker(symbol.replace('.', '-')).get_info() or {}
+        profile = get_profile(symbol)
         cap = profile.get('marketCap')
         return {'sector': profile.get('sector') or None,
                 'marketCap': cap if isinstance(cap, (int, float)) and math.isfinite(cap) and cap > 0 else None}
@@ -259,7 +282,7 @@ def refresh_if_due(now=None):
 def get_portfolio(now=None):
     now = now or datetime.now(timezone.utc)
     seed, fingerprint = load_seed()
-    document = read_cache(fingerprint) or seed
+    document = dict(read_cache(fingerprint) or seed)
     _, next_refresh = refresh_window(now)
     with _LOCK:
         document['refresh'] = {'status': 'updating' if _RUNNING else 'error' if _ERROR else 'ready' if 'lastSuccessfulAt' in document else 'pending',

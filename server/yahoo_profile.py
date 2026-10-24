@@ -27,10 +27,11 @@ def get_profile(symbol, stock=None):
         profile = (stock if stock is not None else yf.Ticker(symbol)).get_info() or {}
         if profile:
             with _LOCK:
-                # Bound memory even when many different companies are requested.
-                if len(_PROFILES) >= 128:
-                    del _PROFILES[min(_PROFILES, key=lambda key: _PROFILES[key][0])]
-                _PROFILES[symbol] = (time.monotonic(), profile)
+                # A discarded preload must not refill the profile cache later.
+                if _PENDING.get(symbol) is pending:
+                    if len(_PROFILES) >= 128:
+                        del _PROFILES[min(_PROFILES, key=lambda key: _PROFILES[key][0])]
+                    _PROFILES[symbol] = (time.monotonic(), profile)
         pending.set_result(profile)
         return profile
     except BaseException as error:
@@ -38,4 +39,21 @@ def get_profile(symbol, stock=None):
         raise
     finally:
         with _LOCK:
-            _PENDING.pop(symbol, None)
+            if _PENDING.get(symbol) is pending:
+                _PENDING.pop(symbol, None)
+
+
+def discard_profile(symbol):
+    with _LOCK:
+        symbol = symbol.replace('.', '-')
+        _PROFILES.pop(symbol, None)
+        # Existing callers can finish, but their result is no longer cacheable.
+        _PENDING.pop(symbol, None)
+
+
+def expire_profiles():
+    now = time.monotonic()
+    with _LOCK:
+        for symbol, (retrieved, _) in list(_PROFILES.items()):
+            if now - retrieved >= PROFILE_TTL:
+                del _PROFILES[symbol]

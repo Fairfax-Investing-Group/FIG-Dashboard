@@ -15,6 +15,7 @@ class StudyPreloadTests(unittest.TestCase):
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         study_preload._JOBS.clear()
+        study_preload._CLOSED_GROUPS.clear()
         self.company = self.fixture.company
         self.study_id = '00000000-0000-4000-8000-000000000001'
 
@@ -39,7 +40,7 @@ class StudyPreloadTests(unittest.TestCase):
     def test_selecting_a_running_preload_receives_existing_and_future_updates_without_duplicate_fetches(self):
         published, release, attached = (threading.Event() for _ in range(3))
         updates = []
-        def fetch(company, study_id, created_at, publish):
+        def fetch(company, study_id, created_at, publish, **kwargs):
             publish({'Study': {'StudyID': study_id}, 'part': 1})
             published.set()
             self.assertTrue(release.wait(3))
@@ -99,3 +100,51 @@ class StudyPreloadTests(unittest.TestCase):
         with patch.object(study_preload._SLOTS, 'acquire', return_value=False):
             self.assertFalse(study_preload.start_preload(self.company))
         self.assertEqual(study_preload._JOBS, {})
+
+    def test_cleanup_wipes_unselected_data_and_keeps_selected_and_other_searches(self):
+        selected = study_preload.Preload(self.company, 'search-one')
+        other_company = {**self.company, 'ticker': 'OTHER', 'cik': 456}
+        other = study_preload.Preload(other_company, 'search-one')
+        independent = study_preload.Preload(other_company, 'search-two')
+        for job in (selected, other, independent):
+            job.latest = {'financials': [123]}
+            job.result = self.inputs()
+            job.done = True
+            study_preload._JOBS[study_preload.preload_key(job.company, job.group)] = job
+        self.assertEqual(study_preload.clear_unselected_preloads('search-one', self.company), 1)
+        self.assertIsNone(other.latest)
+        self.assertIsNone(other.result)
+        self.assertTrue(other.discarded)
+        self.assertIs(study_preload.take_preload(self.company, 'search-one'), selected)
+        self.assertIs(study_preload.take_preload(other_company, 'search-two'), independent)
+        self.assertFalse(study_preload.start_preload(other_company, 'search-one'), 'Late requests cannot recreate discarded entries')
+
+    def test_running_discarded_job_does_not_keep_late_results_or_profiles(self):
+        from server.yahoo_profile import get_profile, _PROFILES
+        from unittest.mock import MagicMock
+        other_company = {**self.company, 'ticker': 'DISCARD', 'cik': 456}
+        started, release = threading.Event(), threading.Event()
+        stock = MagicMock()
+        def info():
+            started.set()
+            self.assertTrue(release.wait(3))
+            return {'longName': 'Discarded company'}
+        stock.get_info.side_effect = info
+        def fetch(company, study_id, created_at, publish, **kwargs):
+            profile = get_profile('DISCARD', stock=stock)
+            publish({'profile': profile})
+            return self.inputs()
+        with patch('server.studies.progressive_inputs', side_effect=fetch):
+            self.assertTrue(study_preload.start_preload(other_company, 'search-one'))
+            job = study_preload._JOBS[study_preload.preload_key(other_company, 'search-one')]
+            try:
+                self.assertTrue(started.wait(3))
+                self.assertEqual(study_preload.clear_unselected_preloads('search-one', self.company), 1)
+            finally:
+                release.set()
+            with job.changed:
+                self.assertTrue(job.changed.wait_for(lambda: job.done, timeout=3))
+        self.assertIsNone(job.latest)
+        self.assertIsNone(job.result)
+        self.assertNotIn('DISCARD', _PROFILES)
+        self.assertIsNone(study_preload.take_preload(other_company, 'search-one'))

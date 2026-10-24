@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './database.types';
 
 const env = import.meta.env ?? {};
@@ -14,7 +14,15 @@ function publicKey(value: string): boolean {
   } catch { return false; }
 }
 
-export const supabase = url && /^https?:\/\//.test(url) && key && publicKey(key)
-  ? createClient<Database>(url, key, {
+export const supabaseConfigured = Boolean(url && /^https?:\/\//.test(url) && key && publicKey(key));
+let clientPromise: Promise<SupabaseClient<Database> | null> | undefined;
+
+// Authentication initializes in the background without adding its SDK to the
+// critical search/chart bundle. All callers share the same client and session.
+export function getSupabaseClient(): Promise<SupabaseClient<Database> | null> {
+  if (!supabaseConfigured) return Promise.resolve(null);
+  clientPromise ??= import('@supabase/supabase-js').then(({ createClient }) => createClient<Database>(url!, key!, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-  }) : null;
+  })).catch(error => { clientPromise = undefined; throw error; });
+  return clientPromise;
+}
