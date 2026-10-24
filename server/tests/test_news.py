@@ -57,3 +57,31 @@ class NewsTests(unittest.TestCase):
         search.return_value.news = [{'title': 'Latest', 'providerPublishTime': 1792713600, 'link': 'https://example.com/latest'}]
         self.assertEqual(get_news('GOOGL')['articles'][0]['title'], 'Latest')
         search.assert_called_once_with('GOOGL', max_results=0, news_count=25)
+
+    @patch('server.news.yf.Ticker')
+    def test_load_more_requests_a_larger_feed_with_older_articles(self, ticker):
+        _fetch_news.cache_clear()
+        self.addCleanup(_fetch_news.cache_clear)
+        items = [self.article(f'Article {i}', f'2026-10-{23 - i // 24:02d}T{23 - i % 24:02d}:00:00Z',
+                              f'https://example.com/{i}') for i in range(60)]
+        ticker.return_value.get_news.side_effect = lambda count, tab: items[:count]
+        first = get_news('AAPL')
+        second = get_news('AAPL', first['nextCount'])
+        last = get_news('AAPL', second['nextCount'])
+        self.assertEqual([len(page['articles']) for page in [first, second, last]], [25, 50, 60])
+        self.assertLess(second['articles'][-1]['publishedAt'], first['articles'][-1]['publishedAt'])
+        self.assertEqual(last['nextCount'], 100)
+        self.assertEqual(ticker.return_value.get_news.call_args_list[-1].kwargs['count'], 75)
+
+    @patch('server.news.yf.Ticker')
+    def test_short_feed_does_not_prematurely_disable_load_more(self, ticker):
+        _fetch_news.cache_clear()
+        self.addCleanup(_fetch_news.cache_clear)
+        ticker.return_value.get_news.return_value = [self.article('Article', '2026-10-23T00:00:00Z', 'https://example.com/1')]
+        self.assertEqual(get_news('AAPL', 25)['nextCount'], 50)
+        self.assertIsNone(get_news('AAPL', 250)['nextCount'])
+
+    def test_invalid_counts_are_rejected(self):
+        for count in [0, 26, 275]:
+            with self.assertRaises(ValueError):
+                get_news('AAPL', count)
