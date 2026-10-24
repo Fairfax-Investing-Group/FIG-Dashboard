@@ -26,6 +26,7 @@ _ERROR = None
 _RETRY_AT = None
 _RUNNING = False
 INDEX_SYMBOLS = {'NASDAQ': '^IXIC', 'S&P 500': '^GSPC', 'DOW JONES': '^DJI', 'RUSSEL 2000': '^RUT'}
+BETA_METHOD = '1y-daily-adjusted-sp500-v1'
 
 
 def cache_path():
@@ -82,10 +83,44 @@ def fetch_history(symbol, start, session):
         def valid(column):
             value = float(row.get(column, float('nan')))
             return value if math.isfinite(value) else None
-        records.append({'date': day, 'close': close, 'high': valid('High'), 'low': valid('Low'), 'split': valid('Stock Splits') or 0})
+        records.append({'date': day, 'close': close, 'adjustedClose': valid('Adj Close'), 'high': valid('High'), 'low': valid('Low'), 'split': valid('Stock Splits') or 0})
     if len(records) < 2 or records[-1]['date'] != session:
         raise ValueError(f'{symbol}: closing price for {session} is not available yet')
     return records
+
+
+def stock_beta(history, benchmark, session):
+    """Trailing-year beta from matched adjusted closing returns; require 60 observations."""
+    cutoff = (datetime.fromisoformat(session) - timedelta(days=365)).date().isoformat()
+    def prices(records):
+        return {point['date']: point['adjustedClose'] for point in records
+                if cutoff <= point['date'] <= session and point.get('adjustedClose') is not None
+                and math.isfinite(point['adjustedClose']) and point['adjustedClose'] > 0}
+    stock, market = prices(history), prices(benchmark)
+    dates = sorted(stock.keys() & market.keys())
+    if len(dates) < 61:
+        return None
+    stock_returns = [stock[day] / stock[previous] - 1 for previous, day in zip(dates, dates[1:])]
+    market_returns = [market[day] / market[previous] - 1 for previous, day in zip(dates, dates[1:])]
+    stock_mean = sum(stock_returns) / len(stock_returns)
+    market_mean = sum(market_returns) / len(market_returns)
+    variance = sum((value - market_mean) ** 2 for value in market_returns)
+    if variance <= 1e-20:
+        return None
+    beta = sum((stock - stock_mean) * (market - market_mean) for stock, market in zip(stock_returns, market_returns)) / variance
+    return beta if math.isfinite(beta) else None
+
+
+def fetch_classification(symbol):
+    """Classification failure should not prevent the daily price update."""
+    try:
+        profile = yf.Ticker(symbol.replace('.', '-')).get_info() or {}
+        cap = profile.get('marketCap')
+        return {'sector': profile.get('sector') or None,
+                'marketCap': cap if isinstance(cap, (int, float)) and math.isfinite(cap) and cap > 0 else None}
+    except Exception:
+        logging.warning('Portfolio classification unavailable for %s', symbol)
+        return {}
 
 
 def calculate_portfolio(seed, histories, session):
@@ -115,10 +150,14 @@ def calculate_portfolio(seed, histories, session):
         holding['high52'] = max(point['high'] for point in annual if point['high'] is not None)
         holding['low52'] = min(point['low'] for point in annual if point['low'] is not None)
         holding['history'] = spark(symbol)
+        holding['beta'] = stock_beta(history, histories['^GSPC'], session)
     summary = result['summary']
     summary['totalCost'] = sum(item['cost'] for item in result['holdings'])
     summary['holdingsValue'] = sum(item['marketValue'] for item in result['holdings'])
     summary['portfolioValue'] = summary['holdingsValue'] + summary['cash']
+    summary['beta'] = (sum(item['marketValue'] * item['beta'] for item in result['holdings']) / summary['portfolioValue']
+                       if summary['portfolioValue'] > 0 and all(item['beta'] is not None for item in result['holdings']) else None)
+    result['betaMethod'] = BETA_METHOD
     summary['gain'] = summary['holdingsValue'] - summary['totalCost']
     summary['portfolioReturn'] = summary['gain'] / summary['totalCost']
     base_index = next(item['price'] for item in seed['indexes'] if item['name'] == 'S&P 500')
@@ -171,7 +210,7 @@ def refresh_if_due(now=None):
     if not session or session < seed['asOf']:
         return False
     cached = read_cache(fingerprint)
-    if cached and cached['asOf'] >= session:
+    if cached and cached['asOf'] >= session and cached.get('betaMethod') == BETA_METHOD and cached.get('classificationVersion') == 1:
         return False
     if _RETRY_AT and now < _RETRY_AT:
         return False
@@ -184,8 +223,16 @@ def refresh_if_due(now=None):
         start = min(seed['asOf'], (datetime.fromisoformat(session) - timedelta(days=375)).date().isoformat())
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = {symbol: pool.submit(fetch_history, symbol, start, session) for symbol in sorted(symbols)}
+            profiles = {item['ticker']: pool.submit(fetch_classification, item['ticker']) for item in seed['holdings']}
             histories = {symbol: future.result() for symbol, future in futures.items()}
+            classifications = {symbol: future.result() for symbol, future in profiles.items()}
         document = calculate_portfolio(seed, histories, session)
+        previous = {item['ticker']: item for item in (cached or seed)['holdings']}
+        for holding in document['holdings']:
+            profile = classifications[holding['ticker']]
+            for key in ('sector', 'marketCap'):
+                holding[key] = profile.get(key) or previous.get(holding['ticker'], {}).get(key)
+        document['classificationVersion'] = 1
         document['seedFingerprint'] = fingerprint
         document['lastSuccessfulAt'] = datetime.now(timezone.utc).isoformat()
         path = cache_path()
