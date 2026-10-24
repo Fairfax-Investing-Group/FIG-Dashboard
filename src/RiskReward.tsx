@@ -9,10 +9,10 @@ type Draft = {
   highPEYears: 5 | 10 | null; lowPEYears: 5 | 10 | null;
   lowMethod: LowPriceMethod; manualLow: string; zoneSplit: ZoneSplit;
   dividend: string | null; payout: string | null; highYield: string | null;
-  desiredRatio: string; targetReturn: string;
+  desiredRatio: string | null; targetReturn: string | null;
 };
 const defaults: Draft = { highMethod: 'pe', manualHigh: '', highPE: '', lowPE: '', highPEYears: null, lowPEYears: null, lowEPSMode: 'auto', lowEPS: '', lowMethod: 'pe', manualLow: '', zoneSplit: '25-50-25',
-  dividend: null, payout: null, highYield: null, desiredRatio: '3', targetReturn: '15' };
+  dividend: null, payout: null, highYield: null, desiredRatio: null, targetReturn: null };
 const number = (value: number | null, digits = 2) => value === null ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 const percent = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
 const sourceInput = (value: string | null, source: number | null) => value ?? (source === null ? '' : String(source));
@@ -43,19 +43,26 @@ export default function RiskReward({ study, current, history, highEPSForecast, e
   const compatible = Boolean(study.priceCurrency && study.priceCurrency === study.financialCurrency);
   const currency = study.priceCurrency ?? '';
   const money = (value: number | null) => value === null ? '—' : study.priceCurrency ? new Intl.NumberFormat('en-US', { style: 'currency', currency: study.priceCurrency, currencyDisplay: 'narrowSymbol' }).format(value) : number(value);
-  const dividendInput = sourceInput(draft.dividend, study.overview?.IndicatedDividend ?? current.dividend);
+  const dividendInput = sourceInput(draft.dividend, five.dividend);
   const payoutInput = sourceInput(draft.payout, five.payout ?? current.payout);
   const highYieldInput = sourceInput(draft.highYield, five.highYield);
   const recent = [...history.filter(row => row.periodEnd !== null).slice(-2).map(row => row.low), current.low].filter((value): value is number => value !== null && value > 0);
   const recentLow = recent.length ? Math.min(...recent) : null;
   const lowEPS = draft.lowEPSMode === 'auto' ? current.eps : assumption(draft.lowEPS);
-  const model = riskReward({ highPE: assumption(highPEInput), lowPE: assumption(lowPEInput), highEPS: compatible ? highEPSForecast : null,
+  const scenarioInputs = { highPE: assumption(highPEInput), lowPE: assumption(lowPEInput), highEPS: compatible ? highEPSForecast : null,
     highMethod: draft.highMethod, manualHigh: assumption(draft.manualHigh),
     lowEPS: compatible ? lowEPS : null, currentPrice: current.price, annualDividend: compatible ? assumption(dividendInput) : null,
     payoutPercent: assumption(payoutInput), highYieldPercent: assumption(highYieldInput), averageLow: five.low, recentLow,
     manualLow: assumption(draft.manualLow), lowMethod: draft.lowMethod, zoneSplit: draft.zoneSplit,
-    desiredRatio: assumption(draft.desiredRatio), targetReturnPercent: assumption(draft.targetReturn),
-  });
+    desiredRatio: null, targetReturnPercent: null,
+  };
+  // Targets affect the buy-price ceiling, so derive defaults from the scenario
+  // before applying either target. Manual edits remain separate from defaults.
+  const scenario = riskReward(scenarioInputs);
+  const calculatedInput = (value: number | null) => value !== null && Number.isFinite(value) && value >= 0 ? value.toFixed(2) : '';
+  const desiredRatioInput = draft.desiredRatio ?? calculatedInput(scenario.upsideDownside);
+  const targetReturnInput = draft.targetReturn ?? calculatedInput(scenario.highReturns.annualReturn);
+  const model = riskReward({ ...scenarioInputs, desiredRatio: assumption(desiredRatioInput), targetReturnPercent: assumption(targetReturnInput) });
   const lowOptions: { key: LowPriceMethod; label: string }[] = [
     { key: 'pe', label: 'Low P/E × low EPS' }, { key: 'recent', label: 'Recent market low' },
     { key: 'average', label: 'Average low price, last 5 years' }, { key: 'dividend', label: 'Dividend-supported price' }, { key: 'manual', label: 'Manual low-price forecast' },
@@ -90,7 +97,8 @@ export default function RiskReward({ study, current, history, highEPSForecast, e
       </div><Summary title="Risk at a glance"><SummaryRow label="Zone" value={<span className="forecast-zone" data-zone={model.zone}>{model.zone}</span>}/><SummaryRow label="Forecast high price" value={money(model.highPrice)}/><SummaryRow label="Forecast low price" value={money(model.lowPrice)}/><SummaryRow label="Current price" value={money(current.price)}/><SummaryRow label="Upside / downside" value={model.upsideDownside === null ? '—' : `${number(model.upsideDownside)} : 1`}/><SummaryRow label="5-year price appreciation" value={percent(model.appreciation)}/></Summary></div>
     </section>
     <section className="forecast-section" aria-labelledby="five-year-potential-title"><div className="fundamentals-title"><h2 id="five-year-potential-title">Five-Year Potential</h2></div><div className="forecast-section-body forecast-layout"><div>
-      <div className="forecast-assumptions"><label>Annual dividend / share<input type="number" min="0" step="0.01" value={dividendInput} onChange={event => set('dividend', event.target.value)}/></label><label>Forecast average payout (%)<input type="number" min="0" step="0.1" value={payoutInput} onChange={event => set('payout', event.target.value)}/></label><label>Target upside/downside<input type="number" min="0" step="0.1" value={draft.desiredRatio} onChange={event => set('desiredRatio', event.target.value)}/></label><label>Target annual return (%)<input type="number" min="0" step="0.1" value={draft.targetReturn} onChange={event => set('targetReturn', event.target.value)}/></label></div>
+      <div className="forecast-assumptions"><label>Annual dividend / share<input type="number" min="0" step="0.01" value={dividendInput} onChange={event => set('dividend', event.target.value)}/></label><label>Forecast average payout (%)<input type="number" min="0" step="0.1" value={payoutInput} onChange={event => set('payout', event.target.value)}/></label><label>Target upside/downside<input type="number" min="0" step="0.1" value={desiredRatioInput} onChange={event => set('desiredRatio', event.target.value)}/></label><label>Target annual return (%)<input type="number" min="0" step="0.1" value={targetReturnInput} onChange={event => set('targetReturn', event.target.value)}/></label></div>
+      <p className="forecast-help">Annual dividend/share starts from the 5-year average dividend/share, including exclusions. Payout starts from the 5-year average, or current payout when unavailable. Targets start from the calculated upside/downside and annual return when available. Edit any field to use your own assumption; Reset assumptions restores automatic values.</p>
       <div className="forecast-current-yield">Current yield <strong>{percent(model.currentYield)}</strong><span>Annual dividend ÷ current price</span></div>
       <div className="financial-table-scroll"><table className="forecast-return-table"><thead><tr><th scope="col">5-year scenario</th><th scope="col">{draft.highMethod === 'manual' ? 'My high price' : 'High P/E'}</th><th scope="col">Average P/E</th></tr></thead><tbody><tr><th scope="row">Forecast P/E</th><td>{number(model.forecastHighPE, 1)}</td><td>{number(model.averagePE, 1)}</td></tr><tr><th scope="row">Forecast price</th><td>{money(model.highPrice)}</td><td>{money(model.averagePrice)}</td></tr><tr><th scope="row">Annualized price appreciation</th><td>{percent(model.highReturns.priceCAGR)}</td><td>{percent(model.averageReturns.priceCAGR)}</td></tr><tr><th scope="row">Estimated average yield</th><td>{percent(model.highReturns.averageYield)}</td><td>{percent(model.averageReturns.averageYield)}</td></tr><tr className="forecast-return-total"><th scope="row">Estimated annual return</th><td>{percent(model.highReturns.annualReturn)}</td><td>{percent(model.averageReturns.annualReturn)}</td></tr></tbody></table></div>
       <p className="forecast-help">Annual return estimate = price CAGR + payout-based yield; dividend reinvestment is not modeled.</p>

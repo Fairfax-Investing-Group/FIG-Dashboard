@@ -84,6 +84,7 @@ export type StudyDocument = {
   MonthlyPrices: { Month: string; Date: string; Close: number }[];
   ComputedValues: { GrowthMethod: 'log-linear-regression'; SalesGrowthRate: number | null; EPSGrowthRate: number | null; PTPGrowthRate: number | null };
   Metadata: {
+    DataStage?: 'fundamentals' | 'complete';
     FinancialCurrency: string | null; PriceCurrency: string | null;
     Sources: Record<'SEC' | 'YahooFinance', { Status: 'ok' | 'error'; URL: string; RetrievedAt: string | null; Error: string | null }>;
     Warnings: string[];

@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SEC_LOCK = threading.Lock()
 LAST_SEC_REQUEST = 0.0
 DB_LOCK = threading.Lock()
+ENRICHMENT_LOCKS = {}
 
 
 def database_path():
@@ -44,10 +45,13 @@ def connection():
         db.close()
 
 
-def save_study(study):
+def save_study(study, inputs=None):
     study = normalize_study(study)
     with DB_LOCK, connection() as db:
         db.execute('INSERT INTO studies (id, payload) VALUES (?, ?)', (study['Study']['StudyID'], json.dumps(study, allow_nan=False)))
+        if inputs is not None:
+            db.execute('CREATE TABLE IF NOT EXISTS study_inputs (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+            db.execute('INSERT INTO study_inputs (id, payload) VALUES (?, ?)', (study['Study']['StudyID'], json.dumps(inputs, allow_nan=False)))
 
 
 def get_study(study_id):
@@ -118,7 +122,7 @@ def fetch_financials(cik):
     return {**normalized, 'url': url, 'retrievedAt': datetime.now(timezone.utc).isoformat()}
 
 
-def fetch_prices(ticker, include_peers=True):
+def fetch_prices(ticker, include_peers=True, fundamentals_only=False):
     # Yahoo uses a hyphen for share classes, e.g. BRK.B -> BRK-B.
     symbol = ticker.replace('.', '-')
     end = date.today() + timedelta(days=1)
@@ -156,7 +160,7 @@ def fetch_prices(ticker, include_peers=True):
         raise ValueError('Yahoo Finance returned no valid closing prices.')
     return {
         'prices': prices, 'currency': metadata.get('currency'), 'symbol': symbol,
-        'priceHistory': price_history, 'market': fetch_market(stock, include_peers=include_peers),
+        'priceHistory': price_history, 'market': fetch_market(stock, include_peers=include_peers, fundamentals_only=fundamentals_only),
         'start': start.isoformat(), 'end': today.isoformat(),
         'splits': splits, 'splitHistoryAvailable': split_history_available,
         'splitHistoryStart': history_start.isoformat(),
@@ -180,12 +184,12 @@ def source_error(source, error):
     return f'{source} could not be reached or returned an invalid response. Try refreshing later.'
 
 
-def create_study(company, include_peers=True, persist=True):
+def create_study(company, include_peers=True, persist=True, fundamentals_only=False):
     # Start both upstream requests as soon as the study is created.
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {
             'sec': executor.submit(fetch_financials, company['cik']),
-            'yfinance': executor.submit(fetch_prices, company['ticker'], include_peers=include_peers),
+            'yfinance': executor.submit(fetch_prices, company['ticker'], include_peers=include_peers, fundamentals_only=fundamentals_only),
         }
         results, errors = {}, {}
         for source, future in futures.items():
@@ -238,10 +242,54 @@ def create_study(company, include_peers=True, persist=True):
         else:
             study['statements'][key] = [adjust_statement(row, verified_splits, prices['end'] if prices else None, prices.get('splitHistoryStart') if prices else None) for row in statements]
     normalized_only(study)
-    study = normalize_study(study)
-    if include_peers:
+    inputs = study
+    study = normalize_study(inputs)
+    study['Metadata']['DataStage'] = 'fundamentals' if fundamentals_only else 'complete'
+    if include_peers and not fundamentals_only:
         from server.peers import add_peers
         add_peers(study, prices.get('market', {}).get('peerSymbols', []) if prices else [])
     if persist:
-        save_study(study)
+        save_study(study, inputs=inputs if fundamentals_only else None)
     return study
+
+
+def complete_study(study_id):
+    """Resume a saved fundamentals snapshot without repeating SEC/price requests.
+
+    Per-study locking makes concurrent retries share the persisted completion.
+    Failed completions leave both the usable snapshot and its inputs intact.
+    """
+    with DB_LOCK:
+        lock = ENRICHMENT_LOCKS.setdefault(study_id, threading.Lock())
+    with lock:
+        saved = get_study(study_id)
+        if saved is None:
+            raise LookupError('Study not found.')
+        if saved['Metadata'].get('DataStage') != 'fundamentals':
+            return saved
+        with DB_LOCK, connection() as db:
+            row = db.execute('SELECT payload FROM study_inputs WHERE id = ?', (study_id,)).fetchone()
+        if not row:
+            raise ValueError('Study inputs are unavailable. Refresh the study to retry.')
+        inputs = json.loads(row[0])
+        symbol = inputs['company']['ticker'].replace('.', '-')
+        profile = inputs.get('market', {}).get('profile') or None
+        market = fetch_market(yf.Ticker(symbol), profile=profile)
+        inputs['market'] = market
+        inputs['warnings'].extend(market.get('warnings', []))
+        # If SEC had no usable annuals, the deferred Yahoo statements can supply
+        # them now. Per-share data still passes the existing split verification.
+        if not inputs['annual']:
+            fallback = fallback_financials(market)
+            if fallback:
+                inputs.update({'annual': fallback['annual'], 'financialCurrency': fallback['currency'], 'statements': fallback['statements']})
+                inputs['warnings'].extend(fallback['warnings'])
+        completed = normalize_study(inputs)
+        from server.peers import add_peers
+        add_peers(completed, market.get('peerSymbols', []))
+        completed['Metadata']['DataStage'] = 'complete'
+        completed['Study']['DateModified'] = datetime.now(timezone.utc).isoformat()
+        with DB_LOCK, connection() as db:
+            db.execute('UPDATE studies SET payload = ? WHERE id = ?', (json.dumps(completed, allow_nan=False), study_id))
+            db.execute('DELETE FROM study_inputs WHERE id = ?', (study_id,))
+        return completed

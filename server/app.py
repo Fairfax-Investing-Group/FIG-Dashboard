@@ -8,12 +8,13 @@ import os
 import re
 import threading
 
-from server.studies import ROOT, company_for, create_study, get_study
+from server.studies import ROOT, company_for, create_study, get_study, complete_study
 from server.quotes import get_quote
 from server.news import get_news
 from server.portfolio import get_portfolio, start_portfolio_scheduler
 
 STUDY_SLOTS = threading.BoundedSemaphore(4)
+COMPLETION_SLOTS = threading.BoundedSemaphore(2)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -65,7 +66,9 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
-        if urlparse(self.path).path != '/api/studies':
+        path = urlparse(self.path).path
+        completion = re.fullmatch(r'/api/studies/([a-f0-9-]{36})/complete', path)
+        if path != '/api/studies' and not completion:
             return self.json_response(404, {'error': 'API route not found.'})
         # JSON requests only; no cross-origin API access is enabled.
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
@@ -75,20 +78,30 @@ class Handler(SimpleHTTPRequestHandler):
             if not 0 < length <= 2048:
                 raise ValueError('Invalid request size.')
             body = json.loads(self.rfile.read(length))
-            if not isinstance(body, dict) or not isinstance(body.get('ticker'), str) or type(body.get('cik')) is not int:
+            if not isinstance(body, dict):
+                raise ValueError('Expected an object.')
+            stage = parse_qs(urlparse(self.path).query).get('stage', ['complete'])[0]
+            if stage not in ('fundamentals', 'complete'):
+                raise ValueError('Invalid study stage.')
+            if not completion and (not isinstance(body.get('ticker'), str) or type(body.get('cik')) is not int):
                 raise ValueError('Provide a ticker and numeric CIK from the company directory.')
-            company = company_for(body['ticker'], body['cik'])
+            company = company_for(body['ticker'], body['cik']) if not completion else None
         except (ValueError, TypeError):
             return self.json_response(400, {'error': 'Choose a valid company from the search results.'})
-        if not STUDY_SLOTS.acquire(blocking=False):
+        slots = COMPLETION_SLOTS if completion else STUDY_SLOTS
+        if not slots.acquire(blocking=False):
             return self.json_response(429, {'error': 'Several studies are being created. Please try again shortly.'})
         try:
-            return self.json_response(201, create_study(company))
+            if completion:
+                return self.json_response(200, complete_study(completion.group(1)))
+            return self.json_response(201, create_study(company, fundamentals_only=stage == 'fundamentals'))
+        except LookupError:
+            return self.json_response(404, {'error': 'Study not found.'})
         except Exception:
             traceback.print_exc()
             return self.json_response(500, {'error': 'Could not save this study. Please try again.'})
         finally:
-            STUDY_SLOTS.release()
+            slots.release()
 
 
 if __name__ == '__main__':

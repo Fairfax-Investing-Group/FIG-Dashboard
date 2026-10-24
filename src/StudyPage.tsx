@@ -475,7 +475,11 @@ function CompanyHeader({ study, quote, quoteStatus }: { study: Study; quote: Mar
   </header>;
 }
 
-export default function StudyPage({ study, onBack, onRefresh }: { study: Study; onBack: () => void; onRefresh: () => void }) {
+export default function StudyPage({ study, onBack, onRefresh, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails }: {
+  study: Study; onBack: () => void; onRefresh: () => void;
+  onFundamentalsReady?: (id: string) => void; detailsStatus?: 'idle' | 'loading' | 'error'; onRetryDetails?: () => void;
+}) {
+  useEffect(() => { onFundamentalsReady?.(study.id); }, [study.id, onFundamentalsReady]);
   const tabs = [{ key: 'fundamentals', label: 'Analyzing Fundamentals' }, { key: 'valuation', label: 'Valuation' }, { key: 'news', label: 'Recent News' }] as const;
   const [tab, setTab] = useState<(typeof tabs)[number]['key']>('fundamentals');
   const [forecastsByStudy, setForecastsByStudy] = useState<Record<string, FinancialForecasts>>({});
@@ -520,6 +524,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
       }
     }}>{item.label}</button>)}</div><div className="study-header-actions"><a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a><button className="primary-button" onClick={onRefresh}>↻ Refresh study</button></div></nav>
     <CompanyHeader study={study} quote={quote} quoteStatus={quoteStatus}/>
+    {detailsStatus !== 'idle' && <aside className="study-background-status" role="status">{detailsStatus === 'error' ? <>Additional study data could not be loaded. Your fundamentals remain available. <button type="button" className="text-button" onClick={onRetryDetails}>Retry</button></> : 'Fundamentals are ready. Loading additional study data…'}</aside>}
     {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={onRefresh}>Retry both sources</button>}</aside>}
     {!study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>

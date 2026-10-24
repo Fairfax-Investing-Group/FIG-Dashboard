@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
 import LoginPage from './LoginPage';
 const StudyPage = lazy(() => import('./StudyPage'));
@@ -24,6 +24,10 @@ export default function App() {
   const [pending, setPending] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [readyStudyId, setReadyStudyId] = useState<string | null>(null);
+  const [detailsStatus, setDetailsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [detailsRetry, setDetailsRetry] = useState(0);
+  const fundamentalsReady = useCallback((id: string) => setReadyStudyId(id), []);
   const cache = useRef(new Map<string, StudyDocument>());
   const request = useRef<AbortController | null>(null);
 
@@ -57,15 +61,38 @@ export default function App() {
     return () => controller.abort();
   }, [route]);
 
+  const studyId = studyDocument?.Study.StudyID;
+  const dataStage = studyDocument?.Metadata.DataStage;
+  useEffect(() => {
+    // The mounted StudyPage signals that Fundamentals is on screen. Do not
+    // start optional requests while the page or its chart bundle is loading.
+    if (!studyId || readyStudyId !== studyId || dataStage !== 'fundamentals' || loading || route !== `/study/${studyId}`) return;
+    const controller = new AbortController();
+    setDetailsStatus('loading');
+    fetch(`/api/studies/${studyId}/complete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: controller.signal,
+    }).then(readResponse).then(data => {
+      if (controller.signal.aborted || readRoute() !== `/study/${studyId}`) return;
+      cache.current.set(studyId, data);
+      setStudyDocument(data);
+      setDetailsStatus('idle');
+    }).catch(error => {
+      if (!controller.signal.aborted && error.name !== 'AbortError') setDetailsStatus('error');
+    });
+    return () => controller.abort();
+  }, [studyId, dataStage, readyStudyId, loading, route, detailsRetry]);
+
   async function createStudy(company: Company) {
     if (request.current && !request.current.signal.aborted && loading) return;
     const controller = new AbortController();
     request.current = controller;
     setPending(company);
+    setReadyStudyId(null);
+    setDetailsStatus('idle');
     setError(null);
     setLoading(true);
     try {
-      const data = await fetch('/api/studies', {
+      const data = await fetch('/api/studies?stage=fundamentals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker: company.ticker, cik: company.cik }),
@@ -95,8 +122,8 @@ export default function App() {
   if (route === '/login') return <LoginPage/>;
   if (loading || error) return <main className="search-page state-page">
     <button className="back-button" onClick={backToSearch}>← Back to search</button>
-    {loading ? <div role="status" className="loading-state"><div className="spinner"/><h1>{pending ? `Studying ${pending.ticker}` : 'Opening your study'}</h1><p>{pending ? 'Gathering annual and quarterly financials, prices, analyst estimates, and industry peers.' : 'Loading your saved study.'}</p><small>Expanded studies can take a few minutes. Your study will show any unavailable data.</small></div> : <div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p>{pending && <button className="primary-button" onClick={() => createStudy(pending)}>Try again</button>}</div>}
+    {loading ? <div role="status" className="loading-state"><div className="spinner"/><h1>{pending ? `Studying ${pending.ticker}` : 'Opening your study'}</h1><p>{pending ? 'Loading financials, price history, and company details for Analyzing Fundamentals.' : 'Loading your saved study.'}</p><small>Additional study data loads after Fundamentals opens.</small></div> : <div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p>{pending && <button className="primary-button" onClick={() => createStudy(pending)}>Try again</button>}</div>}
   </main>;
-  if (route && study) return <Suspense fallback={<main className="search-page"><p role="status">Loading study charts…</p></main>}><StudyPage study={study} onBack={backToSearch} onRefresh={() => createStudy(study.company)}/></Suspense>;
+  if (route && study) return <Suspense fallback={<main className="search-page"><p role="status">Loading study charts…</p></main>}><StudyPage key={study.id} study={study} onBack={backToSearch} onRefresh={() => createStudy(study.company)} onFundamentalsReady={fundamentalsReady} detailsStatus={dataStage === 'fundamentals' ? detailsStatus === 'error' ? 'error' : 'loading' : 'idle'} onRetryDetails={() => setDetailsRetry(value => value + 1)}/></Suspense>;
   return <SearchPage onSelect={createStudy}/>;
 }
