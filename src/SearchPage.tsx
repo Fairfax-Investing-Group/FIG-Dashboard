@@ -52,26 +52,25 @@ export default function SearchPage({ onSelect }: { onSelect: (company: Company) 
         <div className="home-account">
           <a className="home-brand" href="#" aria-label="Fairfax Investing Group home"><img className="home-brand-logo" src={logo} alt="Fairfax Investing Group"/></a>
           <form className="home-login-form" aria-labelledby="home-login-title" onSubmit={event => event.preventDefault()}>
-            <h2 id="home-login-title">Log in</h2>
-            <p>Use your email and password.</p>
+            <h2 id="home-login-title">Investor login</h2>
             <div className="home-login-fields">
               <label className="sr-only" htmlFor="home-login-email">Email address</label>
               <input id="home-login-email" type="email" name="email" autoComplete="username" placeholder="Email" required/>
               <label className="sr-only" htmlFor="home-login-password">Password</label>
               <input id="home-login-password" type="password" name="password" autoComplete="current-password" placeholder="Password" required/>
             </div>
-            <div className="home-login-actions"><button type="submit" disabled aria-describedby="home-login-availability">Log in</button><small id="home-login-availability">Sign-in coming soon</small></div>
+            <div className="home-login-actions"><button type="submit" disabled aria-describedby="home-login-availability">Investor login</button><small id="home-login-availability">Sign-in coming soon</small></div>
           </form>
         </div>
         <section className="home-methodology" aria-label="Welcome and investment methodology">
           <ol>
             <li>Welcome to the Fairfax Investing Group Research Dashboard! This platform serves as a centralized hub for our investment research, where we identify, analyze, and monitor investment opportunities using a Growth at a Reasonable Price (GARP) methodology.</li>
-            <li>Our Investment Philosophy: Our approach draws inspiration from the Beardstown Ladies, an investment club founded in 1983. Their 1995 bestseller, <em>The Beardstown Ladies’ Common-Sense Investment Guide</em>, popularized individual stock research and investment clubs across the country.</li>
-            <li>Navigating the Dashboard: Use the toolbar on the right to access company research, evaluate financial metrics, review investment theses, and explore opportunities through our GARP framework.</li>
+            <li>Our Investment Philosophy: Our approach draws inspiration from the Beardstown Ladies, an investment club founded in 1983. Their 1995 bestseller, <em>The Beardstown Ladies’ Common-Sense Investment Guide</em>, popularized individual stock research and investment clubs across the country. Building upon these principles, Fairfax Investing Group employs a GARP strategy, seeking companies that demonstrate strong financial fundamentals.</li>
+            <li className="home-toolbar-instruction"><span>Using the toolbar: Use the toolbar on the right to access company research, latest news, valuation, investment theses, and financial data, including the latest SEC filings (10-Ks and 10-Qs), earnings per share (EPS), revenue, and growth metrics.</span></li>
           </ol>
         </section>
         <section className="home-company-search" aria-labelledby="company-search-title" onFocusCapture={() => setSearchOpen(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchOpen(false); }} onKeyDown={event => { if (event.key === 'Escape') setSearchOpen(false); }}>
-          <h2 id="company-search-title">Find a company</h2>
+          <h2 id="company-search-title">Find a Company</h2>
           <label className="sr-only" htmlFor="company-search">Company name or stock ticker</label>
       <div className="home-search-control"><div className="search-field">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>

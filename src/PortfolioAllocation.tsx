@@ -42,13 +42,13 @@ function AllocationDonut({ title, data }: { title: string; data: Allocation[] })
         angle += sweep;
         const end = angle, middle = (start + end) / 2;
         const point = (a: number, radius: number) => [110 + Math.cos(a) * radius, 95 + Math.sin(a) * radius];
-        const [x1, y1] = point(start, 75), [x2, y2] = point(end, 75);
-        const [labelX, labelY] = point(middle, 89);
+        const [x1, y1] = point(start, 70), [x2, y2] = point(end, 70);
+        const [labelX, labelY] = point(middle, 84);
         const right = Math.cos(middle) >= 0;
         const tech = title === 'Sector' && item.name === 'Technology';
         return <g key={item.name} tabIndex={0} role="button" aria-label={`${item.name}: ${percent(item.value / total)}; ${item.companies?.join(', ')}`} onMouseEnter={event => { setActive(item.name); setPosition(tooltipPosition(event.currentTarget, '.portfolio-allocation-donut', event.clientX, event.clientY)); }} onMouseMove={event => setPosition(tooltipPosition(event.currentTarget, '.portfolio-allocation-donut', event.clientX, event.clientY))} onFocus={event => { setActive(item.name); setPosition(tooltipPosition(event.currentTarget, '.portfolio-allocation-donut')); }} onBlur={() => setActive(null)} onKeyDown={event => { if (event.key === 'Escape') setActive(null); }} className="portfolio-pie-slice">
-          {sweep >= Math.PI * 2 - .00001 ? <circle cx="110" cy="95" r="75" fill={blues[index % blues.length]}/> : <path d={`M110,95 L${x1},${y1} A75,75 0 ${sweep > Math.PI ? 1 : 0},1 ${x2},${y2} Z`} fill={blues[index % blues.length]} stroke="#fff" strokeWidth="1.5" opacity={active && active !== item.name ? .35 : 1}/>}
-          <text x={tech ? 110 : labelX} y={tech ? 184 : labelY} dominantBaseline="middle" textAnchor={tech ? 'middle' : right ? 'start' : 'end'} fill="#325779" fontSize="9">{abbreviations[item.name] || item.name}</text>
+          {sweep >= Math.PI * 2 - .00001 ? <circle cx="110" cy="95" r="70" fill={blues[index % blues.length]}/> : <path d={`M110,95 L${x1},${y1} A70,70 0 ${sweep > Math.PI ? 1 : 0},1 ${x2},${y2} Z`} fill={blues[index % blues.length]} stroke="#fff" strokeWidth="1.5" opacity={active && active !== item.name ? .35 : 1}/>}
+          <text x={tech ? 110 : labelX} y={tech ? 178 : labelY} dominantBaseline="middle" textAnchor={tech ? 'middle' : right ? 'start' : 'end'} fill="#325779" fontSize="9">{abbreviations[item.name] || item.name}</text>
         </g>;
       })}
     </svg>

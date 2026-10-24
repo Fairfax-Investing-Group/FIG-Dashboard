@@ -877,6 +877,13 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-allocation-pies { grid-template-columns:repeat(2,170px); justify-content:center; min-height:228px; }
 @media(max-width:1000px) { .portfolio-allocation-pies { grid-template-columns:repeat(2,minmax(0,170px)); } }
 
+.home-login-form { display:grid; grid-template-rows:14px minmax(0,1fr) 18px; gap:3px; height:100%; max-height:100%; min-height:0; padding:5px 0 0; align-self:stretch; overflow:hidden; }
+.home-login-fields { grid-template-columns:minmax(0,1fr); grid-template-rows:repeat(2,minmax(0,1fr)); gap:3px; min-height:0; }
+.home-login-fields input { min-height:0; height:100%; padding:2px 6px; }
+.home-login-actions { min-height:0; white-space:nowrap; }
+.home-login-actions button { padding:2px 8px; }
+@media(max-width:800px) { .home-account { grid-template-rows:88px; } .home-account .home-brand { height:88px; } .home-account .home-brand-logo { height:88px; object-fit:contain; } .home-login-form { height:88px; max-height:88px; } }
+
 .portfolio-dashboard { padding-top:4px; }
 .portfolio-top-summary { gap:6px; margin-bottom:4px; }
 .portfolio-charts { gap:6px; margin-bottom:4px; }
@@ -884,3 +891,12 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-partner-detail { margin-top:4px; }
 .portfolio-charts .portfolio-chart { min-height:254px; height:254px; }
 .portfolio-allocation-pies { min-height:244px; }
+
+@media(min-width:1001px) { .portfolio-charts { grid-template-columns:minmax(0,1fr) 350px minmax(0,22%); } }
+.portfolio-allocation-pies { grid-template-columns:repeat(2,160px); }
+.portfolio-allocation-pies .portfolio-allocation-donut svg { width:170px; height:147px; }
+@media(max-width:1000px) { .portfolio-allocation-pies { grid-template-columns:repeat(2,minmax(0,160px)); } }
+
+
+.home-topbar { position:relative; }
+.home-toolbar-instruction>span { display:block; }
