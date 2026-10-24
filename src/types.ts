@@ -42,6 +42,7 @@ export type CompanyOverview = {
   MarketCap?: number | null; beta?: number | null;
   SharesOutstanding?: number | null; AverageVolume?: number | null;
   Dividend?: number | null;
+  IndicatedDividend?: number | null;
 };
 export type Study = {
   id: string;

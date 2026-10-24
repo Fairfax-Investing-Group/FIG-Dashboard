@@ -56,3 +56,13 @@ test('without a live quote, current valuation uses the newest calculated TTM rat
   assert.ok(Math.abs(value.eps - 2.3) < 1e-12);
   assert.ok(Math.abs(value.currentPE - 20) < 1e-12);
 });
+
+test('January-ending annual valuations shift back a display year while retaining the same prices, EPS and P/E', () => {
+  const annual = [row(2026, { periodEnd: '2026-01-31' })];
+  const values = valuationRows(annual, true, 10);
+  assert.equal(values.at(-1).year, 2025);
+  assert.equal(values.at(-1).periodEnd, '2026-01-31');
+  assert.equal(values.at(-1).eps, 2);
+  assert.equal(values.at(-1).highPE, 10);
+  assert.equal(valuationAverage(values, 5).highPE, 10);
+});
