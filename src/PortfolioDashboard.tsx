@@ -42,7 +42,7 @@ function LatestReturnLabels({ point }: { point?: { club: number; benchmark: numb
   const lowestEndpoint = Math.max(...labels.map(label => label.anchorY));
   const highestEndpoint = Math.min(...labels.map(label => label.anchorY));
   labels[0].y = Math.max(top, Math.min(bottom, highestEndpoint - 22));
-  labels[1].y = Math.max(top, Math.min(bottom, lowestEndpoint + 22));
+  labels[1].y = Math.max(top, Math.min(bottom, lowestEndpoint + 38));
   const x = area.x + area.width;
   return <g className="portfolio-latest-labels" aria-label="Latest cumulative returns" style={{ pointerEvents: 'none' }}>{labels.map(label => <g key={label.key}>
     <circle cx={x} cy={label.anchorY} r={3} fill={label.color} stroke="#fff" strokeWidth={1}/>
@@ -84,7 +84,6 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
   const summary = portfolio.summary;
   const sharpe = portfolioSharpe(portfolio.performance);
   const risk = portfolioRiskMetrics(portfolio.performance);
-  const topFiveWeight = summary.portfolioValue > 0 ? [...portfolio.holdings].sort((a, b) => b.marketValue - a.marketValue).slice(0, 5).reduce((sum, holding) => sum + holding.marketValue, 0) / summary.portfolioValue : null;
   const dailyChange = portfolioDayChange(portfolio.holdings, summary.cash);
   const rankedHoldings = [...portfolio.holdings].filter(item => Number.isFinite(item.return)).sort((a, b) => b.return - a.return);
   const bestHolding = rankedHoldings[0];
@@ -117,10 +116,8 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
     { label: 'Beta vs. S&P 500', value: betaLabel(summary.beta), description: `${betaDescription} Market-value weighted, including cash at zero beta.` },
     { label: 'Sortino ratio', value: betaLabel(risk.sortino), description: 'Annualized mean daily return / downside deviation across all daily observations; 0% minimum acceptable return.' },
     { label: 'Max drawdown', value: risk.maxDrawdown == null ? '—' : percent(-risk.maxDrawdown), description: 'Largest peak-to-trough decline in the stored fund-return history, including the starting value.' },
-    { label: 'Cash weight', value: cashAllocation == null ? '—' : percent(cashAllocation), description: 'Cash divided by total portfolio market value.' },
     { label: 'Annualized volatility', value: risk.volatility == null ? '—' : percent(risk.volatility), description: 'Sample standard deviation of daily fund returns × √252.' },
     { label: 'Information ratio', value: betaLabel(risk.informationRatio), description: 'Annualized mean daily fund return minus S&P 500 return, divided by sample tracking error.' },
-    { label: 'Top 5 holdings weight', value: topFiveWeight == null ? '—' : percent(topFiveWeight), description: 'Combined market value of the five largest stocks divided by total portfolio value, including cash.' },
   ];
   return <section className="portfolio-dashboard" aria-label="Portfolio research dashboard">
     <div className="portfolio-top-summary"><div className="portfolio-summary">{metrics.map(metric => <div className="portfolio-summary-item" key={metric.label}><span>{metric.label}</span><strong className={metric.change == null ? '' : changeClass(metric.change)}>{metric.value}</strong></div>)}</div>
