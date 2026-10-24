@@ -27,7 +27,8 @@ test('home company search selects the correct issuer and login opens without a s
   const root = createRoot(document.getElementById('root'));
   try {
     let selected;
-    await React.act(async () => root.render(React.createElement(SearchPage, { onSelect: company => { selected = company; } })));
+    const preloads = [];
+    await React.act(async () => root.render(React.createElement(SearchPage, { onSelect: company => { selected = company; }, onPreload: company => { preloads.push(company.ticker); } })));
     await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
     assert.match(document.querySelector('.home-methodology').textContent, /Welcome to the Fairfax Investing Group Research Dashboard!/);
     const dashboard = document.querySelector('.portfolio-dashboard');
@@ -114,6 +115,8 @@ test('home company search selects the correct issuer and login opens without a s
     assert.equal(document.getElementById('search-results').hidden, false);
     await React.act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
     assert.equal(input.getAttribute('aria-activedescendant'), 'company-option-0');
+    await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
+    assert.deepEqual(preloads, ['TEST0'], 'Keyboard highlighting preloads the active match');
     await React.act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     assert.equal(selected.ticker, 'TEST0');
     assert.equal(document.getElementById('search-results').hidden, true);
@@ -122,6 +125,24 @@ test('home company search selects the correct issuer and login opens without a s
       input.dispatchEvent(new window.Event('input', { bubbles: true }));
     });
     assert.equal(document.querySelectorAll('.company-result').length, 1);
+    const apple = document.querySelector('.company-result');
+    await React.act(async () => {
+      apple.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
+      apple.dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 180));
+    });
+    assert.deepEqual(preloads, ['TEST0'], 'Passing over a result does not preload it');
+    await React.act(async () => {
+      apple.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 180));
+    });
+    assert.deepEqual(preloads, ['TEST0', 'AAPL']);
+    await React.act(async () => {
+      apple.dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true }));
+      apple.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 180));
+    });
+    assert.deepEqual(preloads, ['TEST0', 'AAPL'], 'Repeated highlighting reuses the warm result');
     await React.act(async () => document.querySelector('.company-result').click());
     assert.equal(selected.ticker, 'AAPL');
     window.location.hash = '/login';

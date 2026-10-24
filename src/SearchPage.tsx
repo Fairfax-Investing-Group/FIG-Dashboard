@@ -1,17 +1,35 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import logo from './assets/fairfax-logo.png';
 const PortfolioDashboard = lazy(() => import('./PortfolioDashboard'));
 
 export type Company = { cik: number; name: string; ticker: string; exchange: string | null };
 type Directory = { fields: string[]; data: [number, string, string, string | null][] };
 
-export default function SearchPage({ onSelect }: { onSelect: (company: Company) => void }) {
+export default function SearchPage({ onSelect, onPreload }: { onSelect: (company: Company) => void; onPreload?: (company: Company) => void }) {
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeMatch, setActiveMatch] = useState(-1);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
+  const intentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preloaded = useRef(new Map<string, number>());
+  const cancelIntent = () => {
+    if (intentTimer.current !== null) clearTimeout(intentTimer.current);
+    intentTimer.current = null;
+  };
+  const highlight = (company: Company) => {
+    cancelIntent();
+    if (!onPreload) return;
+    const key = `${company.cik}:${company.ticker}`;
+    if (Date.now() - (preloaded.current.get(key) ?? 0) < 60_000) return;
+    intentTimer.current = setTimeout(() => {
+      intentTimer.current = null;
+      preloaded.current.set(key, Date.now());
+      onPreload(company);
+    }, 150);
+  };
+  useEffect(() => cancelIntent, [query, searchOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -45,6 +63,11 @@ export default function SearchPage({ onSelect }: { onSelect: (company: Company) 
       .filter(company => `${company.ticker} ${company.name}`.toLowerCase().includes(search))
       .sort((a, b) => rank(a) - rank(b) || a.ticker.localeCompare(b.ticker)).slice(0, 10);
   }, [companies, search]);
+
+  useEffect(() => {
+    if (searchOpen && matches[activeMatch]) highlight(matches[activeMatch]);
+    return cancelIntent;
+  }, [activeMatch, matches, searchOpen, onPreload]);
 
   return (
     <main className="home-page">
@@ -90,7 +113,7 @@ export default function SearchPage({ onSelect }: { onSelect: (company: Company) 
               event.preventDefault(); setSearchOpen(true);
               setActiveMatch(current => matches.length ? (current + (event.key === 'ArrowDown' ? 1 : matches.length - 1) + matches.length) % matches.length : -1);
             } else if (event.key === 'Enter' && searchOpen && matches.length) {
-              event.preventDefault(); onSelect(matches[activeMatch >= 0 ? activeMatch : 0]); setSearchOpen(false);
+              event.preventDefault(); cancelIntent(); onSelect(matches[activeMatch >= 0 ? activeMatch : 0]); setSearchOpen(false);
             }
           }}
           autoComplete="off"
@@ -112,7 +135,7 @@ export default function SearchPage({ onSelect }: { onSelect: (company: Company) 
 
         {status === 'ready' && search && matches.length > 0 && <ul className="results" role="listbox" aria-label="Closest matching companies">
           {matches.map((company, index) => <li key={`${company.cik}-${company.ticker}`}>
-            <button id={`company-option-${index}`} role="option" aria-selected={activeMatch === index} className="company-result" onMouseEnter={() => setActiveMatch(index)} onClick={() => { onSelect(company); setSearchOpen(false); }} aria-label={`Create stock study for ${company.name}, ${company.ticker}`}>
+            <button id={`company-option-${index}`} role="option" aria-selected={activeMatch === index} className="company-result" onMouseEnter={() => { setActiveMatch(index); highlight(company); }} onMouseLeave={cancelIntent} onFocus={() => { setActiveMatch(index); highlight(company); }} onBlur={cancelIntent} onClick={() => { cancelIntent(); onSelect(company); setSearchOpen(false); }} aria-label={`Create stock study for ${company.name}, ${company.ticker}`}>
               <span className="company-info"><strong>{company.name}</strong><span>{company.ticker}<span className="separator">·</span>{company.exchange || 'Exchange unavailable'}</span></span>
               <span className="result-action">Create study <span aria-hidden="true">→</span></span>
             </button>

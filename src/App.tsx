@@ -95,6 +95,14 @@ export default function App() {
     return () => controller.abort();
   }, [studyId, dataStage, readyStudyId, loading, route, detailsRetry]);
 
+  function preloadStudy(company: Company) {
+    // This endpoint warms unsaved inputs; creation consumes the same work.
+    void fetch('/api/studies/preload', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker: company.ticker, cik: company.cik }),
+    }).catch(() => { /* Speculative requests never interrupt search or selection. */ });
+  }
+
   async function createStudy(company: Company, retryId?: string) {
     if (request.current && !request.current.signal.aborted && loading) return;
     const controller = new AbortController();
@@ -155,5 +163,5 @@ export default function App() {
     detailsStatus={!pendingView && dataStage === 'fundamentals' ? detailsStatus === 'error' ? 'error' : 'loading' : 'idle'}
     onRetryDetails={() => setDetailsRetry(value => value + 1)}/>;
   if (error) return <main className="search-page state-page"><button className="back-button" onClick={backToSearch}>← Back to search</button><div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p></div></main>;
-  return <SearchPage onSelect={createStudy}/>;
+  return <SearchPage onSelect={createStudy} onPreload={preloadStudy}/>;
 }

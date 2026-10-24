@@ -11,6 +11,7 @@ import re
 import threading
 
 from server.studies import ROOT, company_for, create_study, get_study, complete_study
+from server.study_preload import start_preload
 from server.quotes import get_quote
 from server.news import get_news
 from server.fundamentals_view import fundamentals_view
@@ -140,7 +141,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         completion = re.fullmatch(r'/api/studies/([a-f0-9-]{36})/complete', path)
-        if path != '/api/studies' and not completion:
+        preload = path == '/api/studies/preload'
+        if path != '/api/studies' and not completion and not preload:
             return self.json_response(404, {'error': 'API route not found.'})
         # JSON requests only; no cross-origin API access is enabled.
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
@@ -163,6 +165,9 @@ class Handler(SimpleHTTPRequestHandler):
             company = company_for(body['ticker'], body['cik']) if not completion else None
         except (ValueError, TypeError):
             return self.json_response(400, {'error': 'Choose a valid company from the search results.'})
+        if preload:
+            accepted = start_preload(company)
+            return self.json_response(202 if accepted else 429, {'preloading': accepted})
         slots = COMPLETION_SLOTS if completion else STUDY_SLOTS
         if not slots.acquire(blocking=False):
             return self.json_response(429, {'error': 'Several studies are being created. Please try again shortly.'})
