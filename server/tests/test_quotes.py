@@ -42,15 +42,17 @@ class QuoteTests(unittest.TestCase):
         self.assertEqual(normalize_quote(profile)['postMarket']['change'], 0)
         self.assertEqual(normalize_quote(profile)['postMarket']['percent'], 0)
 
-    @patch('server.quotes.yf.Ticker')
+    @patch('server.yahoo_profile.time.monotonic', return_value=100)
+    @patch('server.yahoo_profile.yf.Ticker')
     @patch('server.quotes.time.time', return_value=120)
-    def test_quote_requests_are_cached_per_minute_and_share_class_symbols_are_mapped(self, clock, ticker):
+    def test_quote_requests_are_cached_per_minute_and_share_class_symbols_are_mapped(self, clock, ticker, profile_clock):
         _fetch_quote.cache_clear()
         ticker.return_value.get_info.return_value = self.profile()
         get_quote('BRK.B')
         get_quote('BRK.B')
         ticker.assert_called_once_with('BRK-B')
         clock.return_value = 180
+        profile_clock.return_value = 161
         get_quote('BRK.B')
         self.assertEqual(ticker.call_count, 2)
         _fetch_quote.cache_clear()

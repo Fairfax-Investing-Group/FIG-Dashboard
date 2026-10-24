@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 import time
 
-import yfinance as yf
+from server.yahoo_profile import get_profile
 
 from server.study_schema import finite
 
@@ -44,7 +44,7 @@ def normalize_quote(profile):
 
 @lru_cache(maxsize=64)
 def _fetch_quote(symbol, minute):
-    profile = yf.Ticker(symbol).get_info() or {}
+    profile = get_profile(symbol)
     result = normalize_quote(profile)
     if not result['regular']:
         raise ValueError('No regular-session quote is available.')
