@@ -354,21 +354,14 @@ function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (num
   const min = Math.min(0, ...available.map(point => point.value)), max = Math.max(0, ...available.map(point => point.value));
   const x = (index: number) => padding + index / Math.max(1, values.length - 1) * (width - padding * 2);
   const y = (value: number) => max === min ? height / 2 : height - padding - (value - min) / (max - min) * (height - padding * 2);
-  const segments: { value: number; index: number }[][] = [];
-  available.forEach(point => {
-    const segment = segments.at(-1);
-    if (segment && segment.at(-1)!.index === point.index - 1) segment.push(point);
-    else segments.push([point]);
-  });
+  const path = available.map((point, index) => `${index ? 'L' : 'M'}${x(point.index)},${y(point.value)}`).join(' ');
   const first = available[0], last = available.at(-1)!;
   const improved = lowerIsBetter ? last.value <= first.value : last.value >= first.value;
   const color = improved ? '#238454' : '#cc4850';
   return <svg className="management-trend" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${name}: ${first.value.toFixed(1)}% to ${last.value.toFixed(1)}%`}>
     <line x1={padding} x2={width - padding} y1={y(0)} y2={y(0)} stroke="#d5dfd9"/>
-    {segments.map((segment, index) => {
-      const path = segment.map((point, index) => `${index ? 'L' : 'M'}${x(point.index)},${y(point.value)}`).join(' ');
-      return <g key={index}><path d={`${path} L${x(segment.at(-1)!.index)},${y(0)} L${x(segment[0].index)},${y(0)} Z`} fill={color} fillOpacity={0.18}/><path d={path} stroke={color} strokeWidth={1.8} fill="none" strokeLinejoin="round"/></g>;
-    })}
+    <path d={`${path} L${x(last.index)},${y(0)} L${x(first.index)},${y(0)} Z`} fill={color} fillOpacity={0.18}/>
+    <path d={path} stroke={color} strokeWidth={1.8} fill="none" strokeLinejoin="round"/>
     {[first, last].map((point, index) => <circle key={index} cx={x(point.index)} cy={y(point.value)} r={2.2} fill={color}/>)}
   </svg>;
 }
