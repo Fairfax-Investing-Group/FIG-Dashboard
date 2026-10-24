@@ -31,6 +31,8 @@ export function allocationGroups(holdings: Holding[], category: (holding: Holdin
 function AllocationDonut({ title, data }: { title: string; data: Allocation[] }) {
   const [active, setActive] = useState<string | null>(null);
   const [position, setPosition] = useState({ left: 0, top: 0 });
+  const classificationUnavailable = data.length === 0 || data.every(item => item.name === 'Unclassified');
+  if (classificationUnavailable) return <div className="portfolio-allocation-donut portfolio-allocation-unavailable"><h4>{title}</h4><p>Classification data unavailable</p></div>;
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const selected = data.find(item => item.name === active);
   const abbreviations: Record<string, string> = { Technology: 'Tech', Healthcare: 'Health', 'Financial Services': 'Financial', 'Communication Services': 'Comm.', 'Consumer Cyclical': 'Consumer', 'Consumer Defensive': 'Defensive', 'Basic Materials': 'Materials', Unclassified: 'Unknown' };
