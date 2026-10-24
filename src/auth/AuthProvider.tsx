@@ -9,7 +9,7 @@ type AuthContextValue = AuthState & {
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
-const unavailable = async () => { throw new Error('Sign-in is currently unavailable. Please try again later.'); };
+const unavailable = async () => { throw new Error('Login is not configured for this site.'); };
 const AuthContext = createContext<AuthContextValue>({ session: null, loading: false, error: null, configured: false, signIn: unavailable, signOut: unavailable });
 
 export function AuthProvider({ children, client: providedClient }: { children: ReactNode; client?: SupabaseClient<Database> | null }) {

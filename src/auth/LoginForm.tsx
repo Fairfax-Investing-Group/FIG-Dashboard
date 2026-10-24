@@ -39,7 +39,6 @@ export default function LoginForm({ compact = false }: { compact?: boolean }) {
       {compact ? passwordField : <div className="login-password-field">{passwordField}<button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? 'Hide' : 'Show'}</button></div>}
     </div>
     <div className={compact ? 'home-login-actions' : undefined}><button className={compact ? undefined : 'primary-button login-submit'} type="submit" disabled={busy || auth.loading || !auth.configured}>{busy ? 'Logging in…' : auth.loading ? 'Checking session…' : compact ? 'Investor login' : 'Log in'}</button></div>
-    {!auth.configured && <p className="login-availability">Sign-in is currently unavailable. You can still explore companies.</p>}
     {message && <p className="auth-error" role="alert">{message}</p>}
   </form>;
 }
