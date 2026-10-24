@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import json
@@ -20,6 +21,7 @@ from server.eps import normalize_eps
 from server.study_schema import normalize_study
 from server.fundamentals import extract_statements, adjust_statement
 from server.market import fetch_market, fallback_financials
+from server.weekly_prices import fetch_weekly_prices
 
 ROOT = Path(__file__).resolve().parents[1]
 SEC_LOCK = threading.Lock()
@@ -158,7 +160,7 @@ def price_observations(history, start, today):
     return {'prices': prices, 'priceHistory': price_history, 'splits': splits, 'splitHistoryAvailable': split_history_available}
 
 
-def fetch_prices(ticker, include_peers=True, fundamentals_only=False):
+def fetch_prices(ticker, include_peers=True, fundamentals_only=False, profile=None):
     symbol = ticker.replace('.', '-')
     today = date.today()
     end = today + timedelta(days=1)
@@ -170,13 +172,19 @@ def fetch_prices(ticker, include_peers=True, fundamentals_only=False):
     stock = yf.Ticker(symbol)
     # Separate instances keep yfinance's mutable per-ticker caches independent.
     with ThreadPoolExecutor(max_workers=2) as executor:
-        history = executor.submit(stock.history, start=history_start.isoformat(), end=end.isoformat(), interval='1d', auto_adjust=False, actions=True, timeout=20, raise_errors=True)
-        market = executor.submit(fetch_market, yf.Ticker(symbol), include_peers=include_peers, fundamentals_only=fundamentals_only)
-        observations = price_observations(history.result(), start, today)
-        metadata = stock.history_metadata or {}
+        history = (executor.submit(fetch_weekly_prices, stock, start, history_start, today) if fundamentals_only else
+                   executor.submit(stock.history, start=history_start.isoformat(), end=end.isoformat(), interval='1d', auto_adjust=False, actions=True, timeout=20, raise_errors=True))
+        market = executor.submit(fetch_market, yf.Ticker(symbol), include_peers=include_peers, fundamentals_only=fundamentals_only, profile=profile)
+        if fundamentals_only:
+            observations = history.result()
+            metadata = {'currency': observations['currency']}
+        else:
+            observations = price_observations(history.result(), start, today)
+            metadata = stock.history_metadata or {}
         market = market.result()
     return {
         **observations, 'currency': metadata.get('currency'), 'symbol': symbol, 'market': market,
+        'interval': '1wk' if fundamentals_only else '1d',
         'start': start.isoformat(), 'end': today.isoformat(),
         'splitHistoryStart': history_start.isoformat(),
         'url': f'https://finance.yahoo.com/quote/{symbol}/history/',
@@ -199,7 +207,52 @@ def source_error(source, error):
     return f'{source} could not be reached or returned an invalid response. Try refreshing later.'
 
 
-def create_study(company, include_peers=True, persist=True, fundamentals_only=False):
+def prepare_financials(study, prices):
+    """Apply verified split normalization to original, unadjusted statements."""
+    if study['sources']['sec']['status'] == 'ok' and prices and prices.get('splitHistoryAvailable'):
+        try:
+            study['annual'] = normalize_eps(study['annual'], prices['splits'], prices['end'], prices['splitHistoryStart'])
+            study['epsAdjustment'] = {
+                'status': 'normalized', 'asOf': prices['end'],
+                'method': 'splits-after-source-filing', 'events': prices['splits'],
+                'historyStart': prices['splitHistoryStart'],
+            }
+        except (ValueError, TypeError, KeyError, OverflowError, ZeroDivisionError):
+            study['epsAdjustment'] = {'status': 'unavailable'}
+            study['warnings'].append('Split normalization failed. EPS is unavailable; refresh to retry.')
+    else:
+        study['epsAdjustment'] = {'status': 'unavailable'}
+        if study['sources']['sec']['status'] == 'ok' and any(row.get('eps') is not None for row in study['annual']):
+            study['warnings'].append('Split history is unavailable. EPS is unavailable; refresh to retry normalization.')
+    if prices and (date.fromisoformat(prices['prices'][0]['date']) - date.fromisoformat(prices['start'])).days > 45:
+        study['warnings'].append('Yahoo Finance has less than ten years of price history for this symbol.')
+    verified_splits = prices['splits'] if prices and prices.get('splitHistoryAvailable') else None
+    for key in ('annual', 'quarterly'):
+        statements = study['statements'].get(key, {} if key == 'annual' else [])
+        if isinstance(statements, dict):
+            study['statements'][key] = {end: adjust_statement(row, verified_splits, prices['end'] if prices else None, prices.get('splitHistoryStart') if prices else None) for end, row in statements.items()}
+        else:
+            study['statements'][key] = [adjust_statement(row, verified_splits, prices['end'] if prices else None, prices.get('splitHistoryStart') if prices else None) for row in statements]
+    normalized_only(study)
+
+
+def create_study(company, include_peers=True, persist=True, fundamentals_only=False, study_id=None):
+    if study_id is None or not persist:
+        return build_study(company, include_peers, persist, fundamentals_only, study_id)
+    # A client-generated ID keeps the initial page and its editable forecasts
+    # attached to the same study. Retrying that creation must not duplicate it.
+    with DB_LOCK:
+        lock = ENRICHMENT_LOCKS.setdefault(study_id, threading.Lock())
+    with lock:
+        saved = get_study(study_id)
+        if saved:
+            if int(saved['Company']['CentralIndexKey']) != company['cik'] or saved['Company']['Ticker'] != company['ticker']:
+                raise ValueError('Study ID belongs to a different company.')
+            return saved
+        return build_study(company, include_peers, persist, fundamentals_only, study_id)
+
+
+def build_study(company, include_peers, persist, fundamentals_only, study_id=None):
     # Start both upstream requests as soon as the study is created.
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {
@@ -216,11 +269,12 @@ def create_study(company, include_peers=True, persist=True, fundamentals_only=Fa
     financials = sec if sec and sec.get('annual') else fallback_financials(prices.get('market', {})) if prices else sec
     financials = financials or sec
     study = {
-        'id': str(uuid.uuid4()), 'company': company,
+        'id': study_id or str(uuid.uuid4()), 'company': company,
         'createdAt': datetime.now(timezone.utc).isoformat(),
         'financialCurrency': financials['currency'] if financials else None,
         'annual': financials['annual'] if financials else [],
         'prices': prices['prices'] if prices else [],
+        'priceInterval': prices.get('interval', '1d') if prices else '1wk' if fundamentals_only else '1d',
         'priceCurrency': prices['currency'] if prices else None,
         'warnings': list(financials['warnings']) if financials else [],
         'statements': financials.get('statements', {}) if financials else {},
@@ -232,31 +286,9 @@ def create_study(company, include_peers=True, persist=True, fundamentals_only=Fa
             'yfinance': {'status': 'ok' if prices else 'error', 'url': f"https://finance.yahoo.com/quote/{company['ticker'].replace('.', '-')}/history/", 'retrievedAt': prices['retrievedAt'] if prices else None, 'error': errors.get('yfinance')},
         },
     }
-    if sec and prices and prices.get('splitHistoryAvailable'):
-        try:
-            study['annual'] = normalize_eps(study['annual'], prices['splits'], prices['end'], prices['splitHistoryStart'])
-            study['epsAdjustment'] = {
-                'status': 'normalized', 'asOf': prices['end'],
-                'method': 'splits-after-source-filing', 'events': prices['splits'],
-                'historyStart': prices['splitHistoryStart'],
-            }
-        except (ValueError, TypeError, KeyError, OverflowError, ZeroDivisionError):
-            study['epsAdjustment'] = {'status': 'unavailable'}
-            study['warnings'].append('Split normalization failed. EPS is unavailable; refresh to retry.')
-    else:
-        study['epsAdjustment'] = {'status': 'unavailable'}
-        if sec and any(row.get('eps') is not None for row in study['annual']):
-            study['warnings'].append('Split history is unavailable. EPS is unavailable; refresh to retry normalization.')
-    if prices and (date.fromisoformat(prices['prices'][0]['date']) - date.fromisoformat(prices['start'])).days > 45:
-        study['warnings'].append('Yahoo Finance has less than ten years of price history for this symbol.')
-    verified_splits = prices['splits'] if prices and prices.get('splitHistoryAvailable') else None
-    for key in ('annual', 'quarterly'):
-        statements = study['statements'].get(key, {} if key == 'annual' else [])
-        if isinstance(statements, dict):
-            study['statements'][key] = {end: adjust_statement(row, verified_splits, prices['end'] if prices else None, prices.get('splitHistoryStart') if prices else None) for end, row in statements.items()}
-        else:
-            study['statements'][key] = [adjust_statement(row, verified_splits, prices['end'] if prices else None, prices.get('splitHistoryStart') if prices else None) for row in statements]
-    normalized_only(study)
+    if fundamentals_only:
+        study['_originalFinancials'] = deepcopy({key: study[key] for key in ('annual', 'statements', 'warnings')})
+    prepare_financials(study, prices)
     inputs = study
     study = normalize_study(inputs)
     study['Metadata']['DataStage'] = 'fundamentals' if fundamentals_only else 'complete'
@@ -269,7 +301,7 @@ def create_study(company, include_peers=True, persist=True, fundamentals_only=Fa
 
 
 def complete_study(study_id):
-    """Resume a saved fundamentals snapshot without repeating SEC/price requests.
+    """Resume the saved SEC inputs; replace the weekly chart with daily prices.
 
     Per-study locking makes concurrent retries share the persisted completion.
     Failed completions leave both the usable snapshot and its inputs intact.
@@ -289,7 +321,19 @@ def complete_study(study_id):
         inputs = json.loads(row[0])
         symbol = inputs['company']['ticker'].replace('.', '-')
         profile = inputs.get('market', {}).get('profile') or None
-        market = fetch_market(yf.Ticker(symbol), profile=profile)
+        daily = None
+        if inputs.get('priceInterval') == '1wk':
+            if '_originalFinancials' not in inputs:
+                raise ValueError('Original statements are unavailable. Refresh the study to retry.')
+            daily = fetch_prices(inputs['company']['ticker'], profile=profile)
+            market = daily['market']
+            inputs.update(deepcopy(inputs['_originalFinancials']))
+            inputs.update({'prices': daily['prices'], 'priceHistory': daily['priceHistory'],
+                           'priceCurrency': daily['currency'], 'priceInterval': '1d'})
+            inputs['sources']['yfinance'] = {'status': 'ok', 'url': daily['url'], 'retrievedAt': daily['retrievedAt'], 'error': None}
+        else:
+            # Compatibility with partial studies saved before weekly loading.
+            market = fetch_market(yf.Ticker(symbol), profile=profile)
         inputs['market'] = market
         inputs['warnings'].extend(market.get('warnings', []))
         # If SEC had no usable annuals, the deferred Yahoo statements can supply
@@ -299,6 +343,8 @@ def complete_study(study_id):
             if fallback:
                 inputs.update({'annual': fallback['annual'], 'financialCurrency': fallback['currency'], 'statements': fallback['statements']})
                 inputs['warnings'].extend(fallback['warnings'])
+        if daily is not None:
+            prepare_financials(inputs, daily)
         completed = normalize_study(inputs)
         from server.peers import add_peers
         add_peers(completed, market.get('peerSymbols', []))

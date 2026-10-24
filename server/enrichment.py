@@ -250,7 +250,7 @@ def apply_enrichment(document, data):
     document['Metadata']['ClassificationProvider'] = 'Yahoo Finance sector/industry keys; SEC SIC (not Morningstar classification codes)'
     document['Metadata']['ScaleFactorsMethod'] = 'dashboard log-space coefficient: bandHeight / transformed range; independent vertical offsets; not vendor chart factors'
     document['Metadata']['Units']['OwnershipPercentages'] = 'percentage-points'
-    document['Metadata']['AvailableSections'] = [key for key in ('AnnualData', 'QuarterlyData', 'AnalystEstimates', 'DailyPrices', 'MonthlyPrices') if document[key]]
+    document['Metadata']['AvailableSections'] = [key for key in ('AnnualData', 'QuarterlyData', 'AnalystEstimates', 'DailyPrices', 'WeeklyPrices', 'MonthlyPrices') if document.get(key)]
     if any(value is not None for value in document['ScaleFactors'].values()):
         document['Metadata']['AvailableSections'].append('ScaleFactors')
     document['Metadata']['UnavailableSections'] = [key for key in document['Metadata']['UnavailableSections'] if (not any(value is not None for value in document['ScaleFactors'].values()) if key == 'ScaleFactors' else not document.get(key))]

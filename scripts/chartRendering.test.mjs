@@ -351,6 +351,17 @@ test('year exclusions update the existing chart without adding or replacing char
     assert.equal(valuationPanel.querySelector('[aria-label="Use 5-year average high P/E"]').getAttribute('aria-pressed'), 'false');
     await exclude('Restore High P/E for 2020');
     assert.equal(document.querySelectorAll('.recharts-wrapper').length, 1);
+    const weeklyStudy = { ...annualStudy, priceInterval: '1wk', prices: [{ date: '2020-12-21', close: 12 }, { date: '2020-12-28', close: 14 }] };
+    await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: weeklyStudy, onBack() {}, onRefresh() {} }))));
+    assert.match(document.querySelector('.company-quote .quote-date').textContent, /Weekly close/);
+    assert.match(document.querySelector('.regular-market-quote .quote-change').textContent, /Daily change unavailable/);
+    assert.match(document.querySelector('.sidebar-chart-controls').textContent, /weekly closes/);
+    assert.equal(document.querySelector('.recharts-wrapper'), chart);
+    assert.equal(forecastInput('Forecast average high P/E').value, '20');
+    await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: { ...annualStudy, priceInterval: '1d' }, onBack() {}, onRefresh() {} }))));
+    assert.doesNotMatch(document.querySelector('.company-quote .quote-date').textContent, /Weekly close/);
+    assert.equal(document.querySelector('.recharts-wrapper'), chart);
+    assert.equal(forecastInput('Forecast average high P/E').value, '20');
     const januaryStudy = { ...annualStudy, id: 'january-year-display', quarterly: [], annual: annualStudy.annual.map(row => ({ ...row, fiscalYear: Number(row.periodEnd.slice(0, 4)), periodEnd: `${row.periodEnd.slice(0, 4)}-01-31` })) };
     await React.act(async () => { root.render(React.createElement(React.StrictMode, null, React.createElement(StudyPage, { study: januaryStudy, onBack() {}, onRefresh() {} }))); });
     await React.act(async () => { await new Promise(resolve => window.requestAnimationFrame(resolve)); });

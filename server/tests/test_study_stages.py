@@ -39,6 +39,18 @@ class StudyStagesTests(unittest.TestCase):
         self.assertEqual(get_study(study['Study']['StudyID']), study)
         return study
 
+    def test_client_id_keeps_creation_retries_on_the_same_study(self):
+        study_id = '00000000-0000-4000-8000-000000000001'
+        with patch('server.studies.fetch_financials', return_value=self.financials) as financials, patch('server.studies.fetch_prices', return_value=self.prices) as prices:
+            first = create_study(self.company, fundamentals_only=True, study_id=study_id)
+            again = create_study(self.company, fundamentals_only=True, study_id=study_id)
+            with self.assertRaises(ValueError):
+                create_study({**self.company, 'cik': 456}, fundamentals_only=True, study_id=study_id)
+        self.assertEqual(first, again)
+        self.assertEqual(first['Study']['StudyID'], study_id)
+        financials.assert_called_once()
+        prices.assert_called_once()
+
     def test_fundamentals_market_only_fetches_the_profile(self):
         stock = MagicMock()
         stock.ticker = 'TEST'
@@ -112,11 +124,12 @@ class StudyStagesTests(unittest.TestCase):
         url = f'http://127.0.0.1:{server.server_port}/api/studies'
         try:
             with patch('server.app.company_for', return_value=self.company), patch('server.studies.fetch_financials', return_value=self.financials), patch('server.studies.fetch_prices', return_value=self.prices), patch('server.studies.fetch_market', return_value={'profile': self.profile}), patch('server.peers.add_peers'), patch.object(Handler, 'log_message'):
-                initial = requests.post(url + '?stage=fundamentals', json={'ticker': 'TEST', 'cik': 123}, timeout=3)
+                initial = requests.post(url + '?stage=fundamentals', json={'ticker': 'TEST', 'cik': 123, 'studyId': '00000000-0000-4000-8000-000000000002'}, timeout=3)
                 self.assertEqual(initial.status_code, 201)
                 self.assertEqual(initial.headers.get('Content-Encoding'), 'gzip')
                 core = initial.json()
                 study_id = core['Study']['StudyID']
+                self.assertEqual(study_id, '00000000-0000-4000-8000-000000000002')
                 self.assertEqual(core['Metadata']['DataStage'], 'fundamentals')
                 final = requests.post(f'{url}/{study_id}/complete', json={}, timeout=3)
                 self.assertEqual(final.status_code, 200)

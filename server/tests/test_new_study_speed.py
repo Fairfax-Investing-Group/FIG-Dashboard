@@ -41,23 +41,24 @@ class NewStudySpeedTests(unittest.TestCase):
         stock, profile_stock = MagicMock(), MagicMock()
         stock.history_metadata = {'currency': 'USD'}
         frame = pd.DataFrame({'Close': [40.0], 'Stock Splits': [0.0]}, index=pd.to_datetime([date.today()]))
-        def history(**kwargs):
+        def history(*args):
             history_started.set()
             self.assertTrue(market_started.wait(2), 'Profile should start before history finishes')
-            return frame
+            return {**price_observations(frame, date.today(), date.today()), 'currency': 'USD'}
         def market(instance, **kwargs):
             self.assertIs(instance, profile_stock)
             self.assertTrue(kwargs['fundamentals_only'])
             market_started.set()
             self.assertTrue(history_started.wait(2))
             return {'profile': {'longName': 'Test Company'}}
-        stock.history.side_effect = history
-        with patch('server.studies.yf.Ticker', side_effect=[stock, profile_stock]) as ticker, patch('server.studies.fetch_market', side_effect=market):
+        with patch('server.studies.yf.Ticker', side_effect=[stock, profile_stock]) as ticker, patch('server.studies.fetch_market', side_effect=market), patch('server.studies.fetch_weekly_prices', side_effect=history):
             result = fetch_prices('BRK.B', fundamentals_only=True)
         self.assertEqual([call.args[0] for call in ticker.call_args_list], ['BRK-B', 'BRK-B'])
         self.assertEqual(result['currency'], 'USD')
         self.assertEqual(result['prices'][0]['close'], 40)
         self.assertEqual(result['market']['profile']['longName'], 'Test Company')
+        self.assertEqual(result['interval'], '1wk')
+        stock.history.assert_not_called()
 
     def test_fast_history_conversion_preserves_windows_missing_values_and_splits(self):
         frame = pd.DataFrame({'Close': [10, 20, float('nan'), 40], 'High': [12, 22, 32, 42],

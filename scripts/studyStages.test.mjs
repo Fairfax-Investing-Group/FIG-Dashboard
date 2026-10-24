@@ -5,8 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
-const firstId = '00000000-0000-4000-8000-000000000001';
-const secondId = '00000000-0000-4000-8000-000000000002';
+let firstId, secondId;
 const doc = (id, stage, name = 'Core company') => ({
   SchemaVersion: 1, Study: { StudyID: id, DateCreated: '2026-10-24T00:00:00Z' },
   Company: { Ticker: 'TEST', CompanyName: name, CentralIndexKey: '123', ExchangeType: 'Nasdaq' },
@@ -29,6 +28,8 @@ test('Fundamentals mounts before completion; background retries and merges prese
     calls.push({ url, options });
     if (url === '/api/studies?stage=fundamentals') {
       creates++;
+      if (creates === 1) firstId = JSON.parse(options.body).studyId;
+      else secondId = JSON.parse(options.body).studyId;
       return creates === 1 ? core.promise : Promise.resolve(response(doc(secondId, 'fundamentals')));
     }
     if (url.endsWith('/complete')) {
@@ -51,7 +52,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
           ? `import React, {useEffect,useState} from 'react'; window.studyCodeLoaded = true; export default function Page(props) {
               const [edit,setEdit] = useState('');
               useEffect(() => props.onFundamentalsReady(props.study.id), [props.study.id,props.onFundamentalsReady]);
-              return <main data-study={props.study.id}><h1>{props.study.company.name}</h1><input aria-label="Forecast" value={edit} onChange={e=>setEdit(e.target.value)}/><span data-status>{props.detailsStatus}</span><button onClick={props.onBack}>Back</button><button onClick={props.onRetryDetails}>Retry details</button></main>;
+              return <main data-study={props.study.id}><h1>{props.study.company.name}</h1><input aria-label="Forecast" value={edit} onChange={e=>setEdit(e.target.value)}/><span data-status>{props.detailsStatus}</span><span data-primary>{props.fundamentalsStatus}</span><button onClick={props.onBack}>Back</button><button onClick={props.onRetryDetails}>Retry details</button></main>;
             }`
           : args.path === './SearchPage'
             ? `import React from 'react'; export default function Search({onSelect}) { return <button onClick={()=>onSelect({ticker:'TEST',cik:123,name:'Test company'})}>Create study</button>; }`
@@ -70,17 +71,21 @@ test('Fundamentals mounts before completion; background retries and merges prese
     assert.equal(calls.length, 1);
     assert.equal(window.studyCodeLoaded, true, 'Study/chart code downloads before the financial response arrives');
     assert.equal(completions.length, 0);
-    assert.match(document.body.textContent, /Loading financials/);
-    await React.act(async () => { core.resolve(response(doc(firstId, 'fundamentals'))); await settle(); });
-    // Lazy page loading and hash navigation complete on separate event-loop turns.
-    await React.act(async () => { await settle(); });
-    assert.equal(completions.length, 1);
-    assert.equal(document.querySelector('[data-status]').textContent, 'loading');
+    assert.equal(document.querySelector('h1').textContent, 'Test company');
+    assert.equal(document.querySelector('[data-primary]').textContent, 'loading');
     const input = document.querySelector('input');
     await React.act(async () => {
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, 'my forecast');
       input.dispatchEvent(new window.Event('input', { bubbles: true }));
     });
+    await React.act(async () => { core.resolve(response(doc(firstId, 'fundamentals'))); await settle(); });
+    // Hash navigation completes on a separate event-loop turn.
+    await React.act(async () => { await settle(); });
+    assert.equal(completions.length, 1);
+    assert.equal(document.querySelector('[data-status]').textContent, 'loading');
+    assert.equal(document.querySelector('input'), input, 'Initial data must fill the mounted page without replacing it');
+    assert.equal(input.value, 'my forecast');
+    assert.equal(document.querySelector('[data-primary]').textContent, 'idle');
     await React.act(async () => { completions[0].resolve(response({ error: 'Temporary error' }, false)); await settle(); });
     assert.equal(document.querySelector('[data-status]').textContent, 'error');
     assert.equal(document.querySelector('input').value, 'my forecast');

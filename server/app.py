@@ -12,6 +12,7 @@ import threading
 from server.studies import ROOT, company_for, create_study, get_study, complete_study
 from server.quotes import get_quote
 from server.news import get_news
+from server.fundamentals_view import fundamentals_view
 from server.portfolio import get_portfolio, start_portfolio_scheduler
 
 STUDY_SLOTS = threading.BoundedSemaphore(4)
@@ -79,6 +80,8 @@ class Handler(SimpleHTTPRequestHandler):
         match = re.fullmatch(r'/api/studies/([a-f0-9-]{36})', path)
         if match:
             study = get_study(match.group(1))
+            if study and study['Metadata'].get('DataStage') == 'fundamentals' and parse_qs(urlparse(self.path).query).get('view') == ['fundamentals']:
+                study = fundamentals_view(study)
             return self.json_response(200, study) if study else self.json_response(404, {'error': 'Study not found. Return to search to create one.'})
         if path.startswith('/api/'):
             return self.json_response(404, {'error': 'API route not found.'})
@@ -104,6 +107,9 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ValueError('Invalid study stage.')
             if not completion and (not isinstance(body.get('ticker'), str) or type(body.get('cik')) is not int):
                 raise ValueError('Provide a ticker and numeric CIK from the company directory.')
+            study_id = body.get('studyId')
+            if study_id is not None and (not isinstance(study_id, str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', study_id)):
+                raise ValueError('Invalid study ID.')
             company = company_for(body['ticker'], body['cik']) if not completion else None
         except (ValueError, TypeError):
             return self.json_response(400, {'error': 'Choose a valid company from the search results.'})
@@ -113,7 +119,8 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if completion:
                 return self.json_response(200, complete_study(completion.group(1)))
-            return self.json_response(201, create_study(company, fundamentals_only=stage == 'fundamentals'))
+            study = create_study(company, fundamentals_only=stage == 'fundamentals', study_id=study_id)
+            return self.json_response(201, fundamentals_view(study) if stage == 'fundamentals' else study)
         except LookupError:
             return self.json_response(404, {'error': 'Study not found.'})
         except Exception:

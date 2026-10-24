@@ -65,11 +65,14 @@ def normalize_study(study):
         # These are aliases of the same verified company totals, not new facts.
         item['TotalRevenue'], item['PretaxIncome'] = item['Sales'], item['PTP']
         annual.append(item)
-    daily = [
+    chart_prices = [
         {'Date': row['date'], 'Close': row['close']}
         for row in sorted(study.get('prices', []), key=lambda row: row['date'])
         if finite(row.get('close')) is not None
     ]
+    interval = study.get('priceInterval', '1d')
+    daily = chart_prices if interval == '1d' else []
+    weekly = chart_prices if interval == '1wk' else []
     monthly = {}
     for point in daily:
         month = point['Date'][:7]
@@ -108,7 +111,7 @@ def normalize_study(study):
             'GrowthMethod': 'log-linear-regression',
             **{f'{key}GrowthRate': growth_rate(annual, key) for key in ('Sales', 'EPS', 'PTP')},
         },
-        'DailyPrices': daily, 'MonthlyPrices': list(monthly.values()),
+        'DailyPrices': daily, 'WeeklyPrices': weekly, 'MonthlyPrices': list(monthly.values()),
         'LegendSeries': [{'Key': key, 'Name': name, 'Color': color} for key, name, color in [('Sales', 'Sales', '#36a655'), ('EPS', 'Split-normalized EPS', '#d946cf'), ('PTP', 'Pre-tax profit', '#2874d0'), ('Price', 'Split-normalized price', '#64748b')]], 'Notes': [], 'AnalystEstimates': [], 'StudyAudit': None,
         'Metadata': {
             'FinancialCurrency': study.get('financialCurrency'), 'PriceCurrency': study.get('priceCurrency'),
@@ -119,6 +122,7 @@ def normalize_study(study):
                 'Events': [{'Date': event['date'], 'Ratio': event['ratio']} for event in adjustment.get('events', [])],
             },
             'PriceAdjustment': 'split-adjusted-without-dividends',
+            'PriceInterval': interval,
             'Sources': sources, 'Warnings': list(study.get('warnings', [])),
             'UnavailableSections': ['QuarterlyData', 'Peers', 'IndustryAverage', 'PeerGroupAverage', 'AnalystEstimates', 'ScaleFactors'],
         },
