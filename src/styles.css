@@ -464,6 +464,8 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .forecast-card output { min-width:98px; padding:4px 6px; color:var(--navy-strong); background:#f3f5f8; border-radius:4px; text-align:right; font-variant-numeric:tabular-nums; }
 .forecast-reference { display:flex; flex-wrap:wrap; align-items:center; gap:5px 8px; margin:-2px 0 10px; font-size:10px; color:#7c8898; }
 .forecast-reference button, .forecast-link { padding:0; border:0; background:transparent; color:var(--navy); text-decoration:underline; font-size:10px; }
+.forecast-reference button[aria-pressed=true] { font-weight:600; text-decoration:none; }
+.forecast-reference button:disabled { color:#929baa; text-decoration:none; cursor:default; }
 .forecast-link { display:block; text-align:left; line-height:1.5; margin-bottom:8px; }
 .forecast-price-result { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:8px; padding-top:8px; border-top:1px solid var(--ui-border); font-size:11px; font-weight:600; color:var(--navy-strong); }
 .forecast-price-result output { min-width:90px; text-align:right; background:transparent; font-size:14px; font-variant-numeric:tabular-nums; }
