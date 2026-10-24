@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import json
 import gzip
+import zlib
 import traceback
 import os
 import re
@@ -52,6 +53,55 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def stream_study(self, company, study_id):
+        # Flush each small NDJSON event, including its gzip synchronization marker.
+        # Whole-response buffering would hold back the early sections.
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/x-ndjson')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('Vary', 'Accept-Encoding')
+        compressor = zlib.compressobj(level=1, wbits=31) if accepts_gzip(self.headers.get('Accept-Encoding', '')) else None
+        if compressor:
+            self.send_header('Content-Encoding', 'gzip')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.close_connection = True
+        connected = True
+
+        def event(kind, document=None, error=None):
+            nonlocal connected
+            if not connected:
+                return
+            value = {'type': kind}
+            if document is not None:
+                value['document'] = fundamentals_view(document)
+            if error is not None:
+                value['error'] = error
+            try:
+                body = (json.dumps(value, allow_nan=False, separators=(',', ':')) + '\n').encode()
+                if compressor:
+                    body = compressor.compress(body) + compressor.flush(zlib.Z_SYNC_FLUSH)
+                self.wfile.write(body)
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                # Persist the study even if the user navigated away mid-stream.
+                connected = False
+        try:
+            study = create_study(company, fundamentals_only=True, study_id=study_id,
+                                 on_progress=lambda document: event('progress', document))
+            event('ready', study)
+        except Exception:
+            traceback.print_exc()
+            event('error', error='Could not save this study. Please try again.')
+        finally:
+            if compressor and connected:
+                try:
+                    self.wfile.write(compressor.flush(zlib.Z_FINISH))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -119,6 +169,8 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if completion:
                 return self.json_response(200, complete_study(completion.group(1)))
+            if stage == 'fundamentals' and 'application/x-ndjson' in self.headers.get('Accept', ''):
+                return self.stream_study(company, study_id)
             study = create_study(company, fundamentals_only=stage == 'fundamentals', study_id=study_id)
             return self.json_response(201, fundamentals_view(study) if stage == 'fundamentals' else study)
         except LookupError:

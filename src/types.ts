@@ -89,7 +89,7 @@ export type StudyDocument = {
     DataStage?: 'fundamentals' | 'complete';
     PriceInterval?: '1d' | '1wk';
     FinancialCurrency: string | null; PriceCurrency: string | null;
-    Sources: Record<'SEC' | 'YahooFinance', { Status: 'ok' | 'error'; URL: string; RetrievedAt: string | null; Error: string | null }>;
+    Sources: Record<'SEC' | 'YahooFinance', { Status: 'ok' | 'error' | 'loading'; URL: string; RetrievedAt: string | null; Error: string | null }>;
     Warnings: string[];
     EPSAdjustment: { Status: 'normalized' | 'unavailable'; AsOf: string | null; Method: string | null; HistoryStart: string | null; Events: { Date: string; Ratio: number }[] };
   };

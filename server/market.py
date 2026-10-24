@@ -4,6 +4,7 @@ import os
 import yfinance as yf
 
 from server.study_schema import finite
+from server.yahoo_profile import get_profile
 
 
 def estimates(profile, earnings, revenue, today=None):
@@ -108,7 +109,7 @@ def fetch_market(stock, include_peers=True, fundamentals_only=False, profile=Non
     errors = []
     if profile is None:
         try:
-            profile = stock.get_info() or {}
+            profile = get_profile(stock.ticker, stock=stock)
         except Exception:
             profile = {}
             errors.append('company profile')

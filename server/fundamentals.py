@@ -78,11 +78,16 @@ def fiscal_period(end, fiscal_month):
     return year, quarter
 
 
-def extract_statements(payload, currency, annual, today=None, submissions=None):
+FUNDAMENTALS_FIELDS = {'Sales', 'EPS', 'PTP', 'NetIncome', 'SharesOut', 'OperatingCashFlow',
+                       'CapitalExpenditures', 'CommonStockEquity', 'EndShares', 'LtDebt'}
+
+
+def extract_statements(payload, currency, annual, today=None, submissions=None, fundamentals_only=False):
     today = today or date.today()
     if not currency:
         return {'annual': {}, 'quarterly': []}
-    candidates = {field: facts_for(payload, field, currency, today) for field in (*DURATION, *INSTANT)}
+    candidates = {field: facts_for(payload, field, currency, today) for field in (*DURATION, *INSTANT)
+                  if not fundamentals_only or field in FUNDAMENTALS_FIELDS}
     recent = (submissions or {}).get('filings', {}).get('recent', {})
     filings = {}
     for form, report, filed, accession in zip(recent.get('form', []), recent.get('reportDate', []), recent.get('filingDate', []), recent.get('accessionNumber', [])):
@@ -135,7 +140,7 @@ def extract_statements(payload, currency, annual, today=None, submissions=None):
                         sources[field] = {**provenance(current), 'Start': str(previous['end'] + timedelta(days=1)), 'DerivedFrom': [provenance(current), provenance(previous)], 'Calculation': 'current-YTD minus prior-YTD'}
         if full_year:
             for key in ('TotalAssets', 'CommonStockEquity'):
-                beginning = select([fact for fact in candidates[key] if 330 <= (end - fact['end']).days <= 380])
+                beginning = select([fact for fact in candidates.get(key, []) if 330 <= (end - fact['end']).days <= 380])
                 if beginning:
                     fields[f'{key}Begin'], sources[f'{key}Begin'] = beginning['value'], provenance(beginning)
         filing = filings.get(end)

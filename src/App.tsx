@@ -4,6 +4,7 @@ import LoginPage from './LoginPage';
 import StudyPage from './StudyPage';
 import { pendingStudy, unknownPendingStudy, rememberStudyCompany } from './pendingStudy';
 import type { Study, StudyDocument } from './types';
+import { readStudyStream } from './studyStream';
 import { studyView } from './studyDocument';
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
@@ -112,10 +113,12 @@ export default function App() {
     try {
       const data = await fetch('/api/studies?stage=fundamentals', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
         body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id }),
         signal: controller.signal,
-      }).then(readResponse);
+      }).then(response => readStudyStream(response, document => {
+        if (!controller.signal.aborted) setPendingView(studyView(document));
+      }, readResponse));
       if (controller.signal.aborted) return;
       cache.current.set(data.Study.StudyID, data);
       setStudyDocument(data);

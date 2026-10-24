@@ -78,7 +78,24 @@ test('Fundamentals mounts before completion; background retries and merges prese
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, 'my forecast');
       input.dispatchEvent(new window.Event('input', { bubbles: true }));
     });
-    await React.act(async () => { core.resolve(response(doc(firstId, 'fundamentals'))); await settle(); });
+    let stream;
+    const body = new ReadableStream({ start(controller) { stream = controller; } });
+    const send = document => stream.enqueue(new TextEncoder().encode(JSON.stringify(document) + '\n'));
+    await React.act(async () => {
+      core.resolve({ ok: true, headers: { get: () => 'application/x-ndjson' }, body });
+      send({ type: 'progress', document: doc(firstId, 'fundamentals', 'Partial company') });
+      await settle();
+    });
+    assert.equal(document.querySelector('h1').textContent, 'Partial company');
+    assert.equal(document.querySelector('[data-primary]').textContent, 'loading');
+    assert.equal(document.querySelector('input'), input);
+    assert.equal(input.value, 'my forecast');
+    assert.equal(completions.length, 0, 'Background completion must wait for the persisted ready event');
+    await React.act(async () => {
+      send({ type: 'ready', document: doc(firstId, 'fundamentals') });
+      stream.close();
+      await settle();
+    });
     // Hash navigation completes on a separate event-loop turn.
     await React.act(async () => { await settle(); });
     assert.equal(completions.length, 1);

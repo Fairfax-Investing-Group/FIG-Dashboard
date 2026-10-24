@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
@@ -22,6 +22,7 @@ from server.study_schema import normalize_study
 from server.fundamentals import extract_statements, adjust_statement
 from server.market import fetch_market, fallback_financials
 from server.weekly_prices import fetch_weekly_prices
+from server.yahoo_profile import get_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 SEC_LOCK = threading.Lock()
@@ -111,8 +112,13 @@ def sec_json(url):
     return response.json()
 
 
-def fetch_financials(cik):
+def fetch_financials(cik, fundamentals_only=False):
     url = f'https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json'
+    if fundamentals_only:
+        payload = sec_json(url)
+        normalized = normalize_financials(payload)
+        normalized['statements'] = extract_statements(payload, normalized['currency'], normalized['annual'], fundamentals_only=True)
+        return {**normalized, '_secPayload': payload, 'url': url, 'retrievedAt': datetime.now(timezone.utc).isoformat()}
     # These documents are independent; sec_json still applies the shared SEC
     # request-rate limit while downloads overlap.
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -236,9 +242,9 @@ def prepare_financials(study, prices):
     normalized_only(study)
 
 
-def create_study(company, include_peers=True, persist=True, fundamentals_only=False, study_id=None):
+def create_study(company, include_peers=True, persist=True, fundamentals_only=False, study_id=None, on_progress=None):
     if study_id is None or not persist:
-        return build_study(company, include_peers, persist, fundamentals_only, study_id)
+        return build_study(company, include_peers, persist, fundamentals_only, study_id, on_progress)
     # A client-generated ID keeps the initial page and its editable forecasts
     # attached to the same study. Retrying that creation must not duplicate it.
     with DB_LOCK:
@@ -249,55 +255,135 @@ def create_study(company, include_peers=True, persist=True, fundamentals_only=Fa
             if int(saved['Company']['CentralIndexKey']) != company['cik'] or saved['Company']['Ticker'] != company['ticker']:
                 raise ValueError('Study ID belongs to a different company.')
             return saved
-        return build_study(company, include_peers, persist, fundamentals_only, study_id)
+        return build_study(company, include_peers, persist, fundamentals_only, study_id, on_progress)
 
 
-def build_study(company, include_peers, persist, fundamentals_only, study_id=None):
-    # Start both upstream requests as soon as the study is created.
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = {
-            'sec': executor.submit(fetch_financials, company['cik']),
-            'yfinance': executor.submit(fetch_prices, company['ticker'], include_peers=include_peers, fundamentals_only=fundamentals_only),
-        }
-        results, errors = {}, {}
-        for source, future in futures.items():
-            try:
-                results[source] = future.result()
-            except Exception as error:
-                errors[source] = source_error('SEC' if source == 'sec' else 'Yahoo Finance', error)
+def build_study(company, include_peers, persist, fundamentals_only, study_id=None, on_progress=None):
+    study_id = study_id or str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+    if on_progress and fundamentals_only:
+        results, errors = progressive_inputs(company, study_id, created_at, on_progress)
+    else:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                'sec': executor.submit(fetch_financials, company['cik'], **({'fundamentals_only': True} if fundamentals_only else {})),
+                'yfinance': executor.submit(fetch_prices, company['ticker'], include_peers=include_peers, fundamentals_only=fundamentals_only),
+            }
+            results, errors = {}, {}
+            for source, future in futures.items():
+                try:
+                    results[source] = future.result()
+                except Exception as error:
+                    errors[source] = source_error('SEC' if source == 'sec' else 'Yahoo Finance', error)
+    inputs = assemble_inputs(company, results, errors, study_id, created_at, fundamentals_only)
+    study = normalize_study(inputs)
+    study['Metadata']['DataStage'] = 'fundamentals' if fundamentals_only else 'complete'
+    if include_peers and not fundamentals_only:
+        from server.peers import add_peers
+        add_peers(study, results.get('yfinance', {}).get('market', {}).get('peerSymbols', []))
+    if persist:
+        save_study(study, inputs=inputs if fundamentals_only else None)
+    return study
+
+
+def assemble_inputs(company, results, errors, study_id, created_at, fundamentals_only):
     sec, prices = results.get('sec'), results.get('yfinance')
     financials = sec if sec and sec.get('annual') else fallback_financials(prices.get('market', {})) if prices else sec
     financials = financials or sec
     study = {
-        'id': study_id or str(uuid.uuid4()), 'company': company,
-        'createdAt': datetime.now(timezone.utc).isoformat(),
+        'id': study_id, 'company': company,
+        'createdAt': created_at,
         'financialCurrency': financials['currency'] if financials else None,
-        'annual': financials['annual'] if financials else [],
+        'annual': deepcopy(financials['annual']) if financials else [],
         'prices': prices['prices'] if prices else [],
         'priceInterval': prices.get('interval', '1d') if prices else '1wk' if fundamentals_only else '1d',
         'priceCurrency': prices['currency'] if prices else None,
         'warnings': list(financials['warnings']) if financials else [],
-        'statements': financials.get('statements', {}) if financials else {},
+        'statements': deepcopy(financials.get('statements', {})) if financials else {},
         'submissions': sec.get('submissions', {}) if sec else {},
         'priceHistory': prices.get('priceHistory', []) if prices else [],
-        'market': prices.get('market', {}) if prices else {},
+        'market': {**(prices.get('market', {}) if prices else {}), **({'profile': results['profile']} if 'profile' in results else {})},
         'sources': {
             'sec': {'status': 'ok' if sec else 'error', 'url': f"https://data.sec.gov/api/xbrl/companyfacts/CIK{company['cik']:010d}.json", 'retrievedAt': sec['retrievedAt'] if sec else None, 'error': errors.get('sec')},
             'yfinance': {'status': 'ok' if prices else 'error', 'url': f"https://finance.yahoo.com/quote/{company['ticker'].replace('.', '-')}/history/", 'retrievedAt': prices['retrievedAt'] if prices else None, 'error': errors.get('yfinance')},
         },
     }
+    if not study['financialCurrency']:
+        study['financialCurrency'] = study['market'].get('profile', {}).get('financialCurrency')
     if fundamentals_only:
         study['_originalFinancials'] = deepcopy({key: study[key] for key in ('annual', 'statements', 'warnings')})
     prepare_financials(study, prices)
-    inputs = study
-    study = normalize_study(inputs)
-    study['Metadata']['DataStage'] = 'fundamentals' if fundamentals_only else 'complete'
-    if include_peers and not fundamentals_only:
-        from server.peers import add_peers
-        add_peers(study, prices.get('market', {}).get('peerSymbols', []) if prices else [])
-    if persist:
-        save_study(study, inputs=inputs if fundamentals_only else None)
+    if sec and '_secPayload' in sec:
+        study['_secPayload'] = sec['_secPayload']
     return study
+
+
+def fetch_initial_history(ticker):
+    today = date.today()
+    try:
+        start = today.replace(year=today.year - 10)
+    except ValueError:
+        start = today.replace(year=today.year - 10, day=28)
+    history_start = min(start, date(today.year - 10, 1, 1))
+    result = fetch_weekly_prices(yf.Ticker(ticker.replace('.', '-')), start, history_start, today)
+    return {**result, 'interval': '1wk', 'start': str(start), 'end': str(today),
+            'splitHistoryStart': str(history_start), 'retrievedAt': datetime.now(timezone.utc).isoformat(),
+            'url': f'https://finance.yahoo.com/quote/{ticker}/history/'}
+
+
+def progressive_inputs(company, study_id, created_at, on_progress):
+    # Three independent upstream tasks: a slow profile never holds back SEC or prices.
+    results, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(fetch_financials, company['cik'], fundamentals_only=True): 'sec',
+            executor.submit(fetch_initial_history, company['ticker']): 'yfinance',
+            executor.submit(get_profile, company['ticker']): 'profile',
+        }
+        pending = set(futures.values())
+        for future in as_completed(futures):
+            source = futures[future]
+            pending.remove(source)
+            try:
+                results[source] = future.result()
+            except Exception as error:
+                errors[source] = source_error('SEC' if source == 'sec' else 'Yahoo Finance', error)
+            profile = results.get('profile') or {}
+            if 'yfinance' in results:
+                results['yfinance']['market'] = {'profile': profile}
+            # The profile can arrive before weekly history, so publish it on its own.
+            snapshot = assemble_inputs(company, results, errors, study_id, created_at, True)
+            snapshot['market'] = {'profile': profile}
+            if not snapshot['financialCurrency']:
+                snapshot['financialCurrency'] = profile.get('financialCurrency')
+            for source in ('sec', 'yfinance'):
+                if source in pending:
+                    snapshot['sources'][source].update(status='loading', error=None)
+            if 'yfinance' in pending:
+                snapshot['warnings'] = [warning for warning in snapshot['warnings'] if 'Split' not in warning and 'EPS' not in warning]
+            document = normalize_study(snapshot)
+            document['Metadata']['DataStage'] = 'fundamentals'
+            on_progress(document)
+    if errors.get('profile'):
+        # Keep profile errors separate from a successful price-history request.
+        if 'yfinance' in results:
+            results['yfinance'].setdefault('market', {}).setdefault('warnings', []).append(errors['profile'])
+    return results, errors
+
+
+def complete_sec_inputs(inputs):
+    payload = inputs.get('_secPayload')
+    if payload is None:
+        return None
+    original = inputs['_originalFinancials']
+    warnings = list(original['warnings'])
+    try:
+        submissions = sec_json(f"https://data.sec.gov/submissions/CIK{inputs['company']['cik']:010d}.json")
+    except Exception:
+        submissions = {}
+        warnings.append('SEC company metadata could not be loaded; financial statements are preserved.')
+    statements = extract_statements(payload, inputs['financialCurrency'], original['annual'], submissions=submissions)
+    return {'statements': statements, 'submissions': submissions, 'warnings': warnings}
 
 
 def complete_study(study_id):
@@ -325,9 +411,14 @@ def complete_study(study_id):
         if inputs.get('priceInterval') == '1wk':
             if '_originalFinancials' not in inputs:
                 raise ValueError('Original statements are unavailable. Refresh the study to retry.')
-            daily = fetch_prices(inputs['company']['ticker'], profile=profile)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                full_sec = executor.submit(complete_sec_inputs, inputs)
+                daily = fetch_prices(inputs['company']['ticker'], profile=profile)
+                sec_completed = full_sec.result()
             market = daily['market']
             inputs.update(deepcopy(inputs['_originalFinancials']))
+            if sec_completed is not None:
+                inputs.update(sec_completed)
             inputs.update({'prices': daily['prices'], 'priceHistory': daily['priceHistory'],
                            'priceCurrency': daily['currency'], 'priceInterval': '1d'})
             inputs['sources']['yfinance'] = {'status': 'ok', 'url': daily['url'], 'retrievedAt': daily['retrievedAt'], 'error': None}
