@@ -166,7 +166,7 @@ footer a:hover { text-decoration: underline; }
 
 .overlay-note { font-size:11px; color:#7d8999; line-height:1.8; margin:18px 0 8px; }
 .chart-baselines { display:flex; flex-wrap:wrap; gap:6px 18px; color:#99a2af; font-size:10px; line-height:1.7; }
-.overlay-tooltip { display:flex; align-items:center; gap:9px; background:#fff; border:1px solid #e5e9ef; border-radius:6px; padding:6px 9px; font-size:11px; white-space:nowrap; box-shadow:0 3px 12px #19212c0a; }
+.overlay-tooltip { transform:translate(-50%, calc(-100% - 10px)); display:flex; align-items:center; gap:9px; background:#fff; border:1px solid #e5e9ef; border-radius:6px; padding:6px 9px; font-size:11px; white-space:nowrap; box-shadow:0 3px 12px #19212c0a; }
 .overlay-tooltip>span { color:#7c8990; }
 .overlay-tooltip b { font-weight:500; font-variant-numeric:tabular-nums; }
 @media(max-width:540px) { .chart-series-legend { grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px 12px; }  .chart-series-item strong { font-size:14px; } }

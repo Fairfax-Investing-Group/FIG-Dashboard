@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
 import type { AnnualRow, FactSource, Metric, Study } from './types';
 import { annualGrowth, fiveYearEstimate, logLinearRegression } from './financialMath';
 import { nearestChartLine, nearestObservation, interpolatedObservation } from './chartInteraction';
@@ -36,46 +37,145 @@ const chartSeries: { key: ChartKey; title: string; color: string }[] = [
 const timestamp = (value: string) => Date.parse(`${value}T00:00:00Z`);
 const chartDate = (value: number) => displayDate(new Date(value).toISOString().slice(0, 10));
 
-type HoverLine = { id: ChartLineId; points: { timestamp: number; value: number | null }[] };
-type HoveredObservation = { id: ChartLineId; timestamp: number };
+type HoverLine = {
+  id: ChartLineId;
+  points: { timestamp: number; value: number | null }[];
+  observations: { timestamp: number; value: number }[];
+  color: string;
+  formatValue: (value: number) => string;
+};
+type HoveredObservation = { id: ChartLineId; timestamp: number; clientX: number; clientY: number };
+type PointerPosition = { svg: SVGSVGElement; clientX: number; clientY: number };
 
-function LineHoverLayer({ lines, hovered, onHover, onSelect }: { lines: HoverLine[]; hovered: HoveredObservation | null; onHover: (hit: HoveredObservation | null) => void; onSelect: (id: ChartLineId) => void }) {
+function LineHoverLayer({ lines, onSelect, onMove }: { lines: HoverLine[]; onSelect: (id: ChartLineId) => void; onMove: (key: ChartKey, delta: number) => void }) {
   const area = usePlotArea();
   const xScale = useXAxisScale(), yScale = useYAxisScale(), xInverse = useXAxisInverseScale();
-  if (!area || !xScale || !yScale || !xInverse) return null;
-  const pixels = lines.map(line => ({ id: line.id, priority: line.id.endsWith(':actual') ? 1 : 0, points: line.points.map(point => {
-    const x = xScale(point.timestamp), y = point.value === null ? undefined : yScale(point.value);
-    return x === undefined || y === undefined ? null : { x, y };
-  }) }));
-  function hitAt(event: { currentTarget: SVGRectElement; clientX: number; clientY: number }) {
-    const svg = event.currentTarget.closest('svg');
-    if (!svg) return null;
-    const bounds = svg.getBoundingClientRect();
-    const x = (event.clientX - bounds.left) * (svg.viewBox.baseVal.width || bounds.width) / bounds.width;
-    const y = (event.clientY - bounds.top) * (svg.viewBox.baseVal.height || bounds.height) / bounds.height;
-    const id = nearestChartLine(pixels, { x, y });
-    const line = lines.find(line => line.id === id);
-    const observations = line?.points.filter((point): point is { timestamp: number; value: number } => point.value !== null) ?? [];
-    const time = Number(xInverse!(x));
-    const observation = id?.endsWith(':fit') ? interpolatedObservation(observations, time) : nearestObservation(observations, time);
-    return id && observation ? { id, timestamp: observation.timestamp } : null;
+  const [hovered, setHovered] = useState<HoveredObservation | null>(null);
+  const frame = useRef<number | null>(null);
+  const pendingPointer = useRef<PointerPosition | null>(null);
+  const drag = useRef<{ key: ChartKey; startY: number; delta: number; min: number; max: number; elements: SVGElement[] } | null>(null);
+  const suppressClick = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  // Pixel geometry and formatters remain cached while only the hover overlay moves.
+  const targets = useMemo(() => lines.map(line => ({ ...line,
+    validPoints: line.points.filter((point): point is { timestamp: number; value: number } => point.value !== null),
+    priority: line.id.endsWith(':actual') ? 1 : 0,
+    pixels: line.points.map(point => {
+      const x = xScale?.(point.timestamp), y = point.value === null ? undefined : yScale?.(point.value);
+      return x === undefined || y === undefined ? null : { x, y };
+    }),
+  })), [lines, xScale, yScale]);
+  const pixels = useMemo(() => targets.map(line => ({ id: line.id, priority: line.priority, points: line.pixels })), [targets]);
+
+  // Drag previews move SVG groups without recalculating chart data each frame.
+  useLayoutEffect(() => {
+    if (!drag.current) return;
+    for (const element of drag.current.elements) element.style.transform = '';
+    drag.current = null;
+  }, [lines]);
+
+  function clearHover() {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+    pendingPointer.current = null;
+    setHovered(null);
   }
-  const hoveredPoints = lines.find(line => line.id === hovered?.id)?.points.filter((point): point is { timestamp: number; value: number } => point.value !== null) ?? [];
-  const marked = hovered?.id.endsWith(':fit') ? interpolatedObservation(hoveredPoints, hovered.timestamp) : hoveredPoints.find(point => point.timestamp === hovered?.timestamp);
-  const color = chartSeries.find(metric => hovered?.id.startsWith(`${metric.key}:`))?.color;
-  return <ZIndexLayer zIndex={2500}><g className="line-hover-layer">
-    <rect data-testid="line-hover-area" x={area.x} y={area.y} width={area.width} height={area.height} fill="transparent" style={{ cursor: 'crosshair' }} onPointerMove={event => onHover(hitAt(event))} onPointerDown={event => onHover(hitAt(event))} onPointerLeave={() => onHover(null)} onClick={event => { const hit = hitAt(event); onHover(hit); if (hit) onSelect(hit.id); }}/>
-    {marked && marked.value !== null && <g pointerEvents="none"><line x1={xScale(marked.timestamp)} x2={xScale(marked.timestamp)} y1={area.y} y2={area.y + area.height} stroke={color} strokeOpacity={0.25} strokeDasharray="3 4"/><circle cx={xScale(marked.timestamp)} cy={yScale(marked.value)} r={6} fill={color} stroke="white" strokeWidth={2}/></g>}
-  </g></ZIndexLayer>;
+  useEffect(() => {
+    window.addEventListener('scroll', clearHover, true);
+    window.addEventListener('resize', clearHover);
+    return () => {
+      window.removeEventListener('scroll', clearHover, true);
+      window.removeEventListener('resize', clearHover);
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+    };
+  }, []);
+
+  function hitAt(pointer: PointerPosition) {
+    const bounds = pointer.svg.getBoundingClientRect();
+    const x = (pointer.clientX - bounds.left) * (pointer.svg.viewBox.baseVal.width || bounds.width) / bounds.width;
+    const y = (pointer.clientY - bounds.top) * (pointer.svg.viewBox.baseVal.height || bounds.height) / bounds.height;
+    const id = nearestChartLine(pixels, { x, y });
+    const line = targets.find(line => line.id === id);
+    const time = Number(xInverse?.(x));
+    const observation = line ? id?.endsWith(':fit') ? interpolatedObservation(line.validPoints, time) : nearestObservation(line.validPoints, time) : null;
+    return id && observation ? { id, timestamp: observation.timestamp, clientX: pointer.clientX, clientY: pointer.clientY } : null;
+  }
+  function pointerPosition(event: { currentTarget: SVGRectElement; clientX: number; clientY: number }): PointerPosition | null {
+    const svg = event.currentTarget.closest('svg');
+    return svg ? { svg, clientX: event.clientX, clientY: event.clientY } : null;
+  }
+  function previewDrag(pointer: PointerPosition) {
+    const current = drag.current;
+    if (!current) return;
+    const bounds = pointer.svg.getBoundingClientRect();
+    const scale = (pointer.svg.viewBox.baseVal.height || bounds.height) / bounds.height;
+    current.delta = Math.max(current.min, Math.min(current.max, (pointer.clientY - current.startY) * scale));
+    for (const element of current.elements) element.style.transform = `translateY(${current.delta}px)`;
+  }
+  function startDrag(event: React.PointerEvent<SVGRectElement>) {
+    if (event.button !== 0 || !area) return;
+    const pointer = pointerPosition(event);
+    const hit = pointer ? hitAt(pointer) : null;
+    if (!pointer || !hit) return;
+    clearHover();
+    suppressClick.current = false;
+    const key = hit.id.split(':')[0] as ChartKey;
+    const ys = targets.filter(line => line.id.startsWith(`${key}:`)).flatMap(line => line.pixels.flatMap(point => point ? [point.y] : []));
+    drag.current = { key, startY: pointer.clientY, delta: 0, min: Math.min(0, area.y - Math.min(...ys)), max: Math.max(0, area.y + area.height - Math.max(...ys)), elements: [...pointer.svg.querySelectorAll<SVGElement>(`.draggable-series-${key}`)] };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
+  }
+  function endDrag(event: React.PointerEvent<SVGRectElement>, cancel = false) {
+    const current = drag.current;
+    if (!current) return;
+    const pointer = pointerPosition(event);
+    if (pointer && !cancel) previewDrag(pointer);
+    suppressClick.current = Math.abs(current.delta) > 2;
+    clearHover();
+    setDragging(false);
+    if (!cancel && current.delta !== 0 && yScale) {
+      const unitHeight = yScale(0)! - yScale(1)!;
+      onMove(current.key, -current.delta / unitHeight);
+    } else {
+      for (const element of current.elements) element.style.transform = '';
+      drag.current = null;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+  function queuePointer(event: { currentTarget: SVGRectElement; clientX: number; clientY: number }) {
+    pendingPointer.current = pointerPosition(event);
+    if (frame.current !== null) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      const pointer = pendingPointer.current;
+      if (pointer && drag.current) previewDrag(pointer);
+      else setHovered(pointer ? hitAt(pointer) : null);
+    });
+  }
+  const target = targets.find(line => line.id === hovered?.id);
+  const regression = target?.id.endsWith(':fit');
+  const marked = target && hovered ? regression ? interpolatedObservation(target.validPoints, hovered.timestamp) : nearestObservation(target.validPoints, hovered.timestamp) : null;
+  const observation = target && hovered ? regression ? interpolatedObservation(target.observations, hovered.timestamp, 'log') : nearestObservation(target.observations, hovered.timestamp) : null;
+  if (!area || !xScale || !yScale || !xInverse) return null;
+  return <>
+    <ZIndexLayer zIndex={2500}><g className="line-hover-layer">
+      <rect data-testid="line-hover-area" x={area.x} y={area.y} width={area.width} height={area.height} fill="transparent" style={{ cursor: dragging ? 'grabbing' : hovered ? 'grab' : 'crosshair', touchAction: 'none' }} onPointerMove={queuePointer} onPointerDown={startDrag} onPointerUp={event => endDrag(event)} onPointerLeave={() => { if (!drag.current) clearHover(); }} onPointerCancel={event => endDrag(event, true)} onMouseMove={event => event.stopPropagation()} onTouchMove={event => event.stopPropagation()} onClick={event => {
+        if (suppressClick.current) { suppressClick.current = false; return; }
+        const pointer = pointerPosition(event);
+        const hit = pointer ? hitAt(pointer) : null;
+        setHovered(hit);
+        if (hit) onSelect(hit.id);
+      }}/>
+      {marked && target && <g pointerEvents="none"><line x1={xScale(marked.timestamp)} x2={xScale(marked.timestamp)} y1={area.y} y2={area.y + area.height} stroke={target.color} strokeOpacity={0.25} strokeDasharray="3 4"/><circle cx={xScale(marked.timestamp)} cy={yScale(marked.value)} r={6} fill={target.color} stroke="white" strokeWidth={2}/></g>}
+    </g></ZIndexLayer>
+    {hovered && target && observation && createPortal(<div role="tooltip" style={{ position: 'fixed', left: 0, top: 0, width: 'max-content', transform: `translate3d(${hovered.clientX}px, ${hovered.clientY}px, 0)`, willChange: 'transform', pointerEvents: 'none', zIndex: 1000 }}><div className="overlay-tooltip"><span>{new Date(observation.timestamp).getUTCFullYear()}</span><b style={{ color: target.color }}>{target.formatValue(observation.value)}</b></div></div>, document.body)}
+  </>;
 }
 
 function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) {
+  const [offsets, setOffsets] = useState<Partial<Record<ChartKey, number>>>({});
   const [hidden, setHidden] = useState<ChartLineId[]>([]);
   const [selected, setSelected] = useState<ChartLineId | null>(null);
-  const [hovered, setHovered] = useState<HoveredObservation | null>(null);
-  function hoverLine(hit: HoveredObservation | null) {
-    setHovered(current => current?.id === hit?.id && current?.timestamp === hit?.timestamp ? current : hit);
-  }
   const financials: ChartPoint[] = annual.map(row => ({ timestamp: timestamp(row.periodEnd), sales: row.sales, eps: row.eps, pretaxProfit: row.pretaxProfit }));
   const prices: ChartPoint[] = study.prices.map(point => ({ timestamp: timestamp(point.date), close: point.close }));
   const points = new Map<number, ChartPoint>();
@@ -104,11 +204,9 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
   const lineVisible = (id: ChartLineId) => lines.some(line => line.id === id) && !hidden.includes(id);
   function inspectLine(id: ChartLineId | null) {
     setSelected(id);
-    setHovered(null);
     if (id) setHidden(current => current.filter(item => item !== id));
   }
   function toggleLine(id: ChartLineId) {
-    setHovered(null);
     setHidden(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
     if (selected === id) setSelected(null);
   }
@@ -121,7 +219,7 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
   // Apply logarithms before positioning each series in its vertical band. Bands
   // overlap to give rises and dips substantial vertical range in one chart.
   const bandHeight = 3.4;
-  const spaced = series.map((metric, index) => {
+  const originalSpaced = series.map((metric, index) => {
     const available = metric.data.map(point => point[metric.key]).filter((value): value is number => value != null);
     if (!available.length) return metric;
     const signed = available.some(value => value <= 0);
@@ -139,14 +237,21 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
       regressionData: metric.regressionData.map(point => ({ ...point, [metric.key]: bottom + (range === 0 ? bandHeight / 2 : (log(point[metric.key]!) - min) / range * bandHeight) })),
     };
   });
-  const isolatedPoints = visible.length === 1 ? spaced.filter(metric => metric.key === visible[0].key).flatMap(metric => [
+  const isolatedPoints = visible.length === 1 ? originalSpaced.filter(metric => metric.key === visible[0].key).flatMap(metric => [
     ...(lineVisible(`${metric.key}:actual`) ? metric.data : []),
     ...(metric.key !== 'close' && lineVisible(`${metric.key}:fit`) ? metric.regressionData : []),
   ].map(point => point[metric.key]).filter((value): value is number => value != null)) : [];
+  const spaced = originalSpaced.map(metric => ({ ...metric,
+    data: metric.data.map(point => ({ ...point, [metric.key]: point[metric.key] == null ? null : point[metric.key]! + (offsets[metric.key] ?? 0) })),
+    regressionData: metric.regressionData.map(point => ({ ...point, [metric.key]: point[metric.key]! + (offsets[metric.key] ?? 0) })),
+  }));
   const hoverLines: HoverLine[] = visibleLines.map(line => {
     const metric = spaced.find(metric => metric.key === line.key)!;
     const data = line.kind === 'fit' ? metric.regressionData : metric.data;
-    return { id: line.id, points: data.map(point => ({ timestamp: point.timestamp, value: point[line.key] ?? null })) };
+    const millions = line.key === 'sales' || line.key === 'pretaxProfit';
+    const currency = line.key === 'close' ? study.priceCurrency : study.financialCurrency;
+    const formatter = new Intl.NumberFormat('en-US', { ...(currency ? { style: 'currency' as const, currency, currencyDisplay: 'narrowSymbol' as const } : {}), minimumFractionDigits: millions ? 0 : 2, maximumFractionDigits: millions ? 0 : 2 });
+    return { id: line.id, observations: line.observations, color: line.color, formatValue: (value: number) => `${formatter.format(millions ? value / 1_000_000 : value)}${millions ? 'M' : ''}`, points: data.map(point => ({ timestamp: point.timestamp, value: point[line.key] ?? null })) };
   });
   const domain: [number, number] = isolatedPoints.length ? [Math.min(...isolatedPoints) - 0.2, Math.max(...isolatedPoints) + 0.2] : [0, series.length - 1 + bandHeight + 0.3];
   const axisNames: Record<ChartKey, string> = { sales: 'Sales', eps: 'EPS', pretaxProfit: 'Pre-tax profit', close: 'Stock price' };
@@ -166,29 +271,21 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
     <div className="line-inspector-controls">
       <label>Inspect line <select aria-label="Inspect a chart line" value={selectedLine?.id ?? ''} onChange={event => inspectLine(event.target.value ? event.target.value as ChartLineId : null)}><option value="">All visible lines</option>{lines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select></label>
       <button disabled={!selectedLine} onClick={() => { if (selectedLine) setHidden(lines.filter(line => line.id !== selectedLine.id).map(line => line.id)); }}>Show only this line</button>
-      <button onClick={() => { setHidden([]); setSelected(null); setHovered(null); }}>Show all</button>
+      <button onClick={() => { setHidden([]); setSelected(null); }}>Show all</button>
+      <button onClick={() => { setOffsets({}); setHidden([]); setSelected(null); }}>Reset chart</button>
     </div>
-    <div className="line-inspector-status" role="status">{selectedLine ? <><i style={{ background: selectedLine.color }}/><strong>{selectedLine.name}</strong><span>{chartDate(selectedLine.observations[0].timestamp)} – {chartDate(selectedLine.observations.at(-1)!.timestamp)} · Hover for yearly actuals or smooth fitted values</span></> : 'Hover near a line for its value; regression hovers follow the cursor smoothly. Click to select; toggle Actual and Regression independently.'}</div>
+    <div className="line-inspector-status" role="status">{selectedLine ? <><i style={{ background: selectedLine.color }}/><strong>{selectedLine.name}</strong><span>{chartDate(selectedLine.observations[0].timestamp)} – {chartDate(selectedLine.observations.at(-1)!.timestamp)} · Hover for yearly actuals or smooth fitted values</span></> : 'Drag a line vertically to reposition it. Hover for its value; regression hovers follow the cursor smoothly. Click to select; toggle Actual and Regression independently.'}</div>
     <div className="plot-meta"><span>TREND COMPARISON</span><span>Logarithmic scales{usesSymlog ? ' · Symmetric log for zero or losses' : ''}</span></div>
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 24, right: 24, bottom: 12, left: 0 }} accessibilityLayer>
       <CartesianGrid vertical horizontal stroke="#e8edf0" syncWithTicks/>
       <XAxis dataKey="timestamp" type="number" scale="time" domain={[Date.UTC(firstYear, 0, 1), Date.UTC(lastYear, 11, 31)]} ticks={yearTicks} tickFormatter={value => String(new Date(Number(value)).getUTCFullYear())} tick={{ fontSize: 12, fill: '#7c8793', fontWeight: 500 }} tickLine={false} axisLine={false} minTickGap={30} dy={12}/>
       <YAxis domain={domain} type="number" scale="linear" width={84} ticks={axisLabels.map(label => label.value)} interval={0} axisLine={{ stroke: '#e1e7e4' }} tickLine={{ stroke: '#d3ddd6' }} allowDataOverflow tick={({ x, y, payload }) => {
         const label = axisLabels.find(item => item.value === Number(payload.value));
-        return <text x={Number(x) - 7} y={Number(y)} dy={4} textAnchor="end" fill={label?.color} fontSize={10} fontWeight={500}>{label?.name}</text>;
+        return <text className={`draggable-series-${spaced.find(metric => axisNames[metric.key] === label?.name)?.key}`} x={Number(x) - 7} y={Number(y)} dy={4} textAnchor="end" fill={label?.color} fontSize={10} fontWeight={500}>{label?.name}</text>;
       }}/>
-      <Tooltip active={hovered !== null} cursor={false} content={() => {
-        const line = visibleLines.find(line => line.id === hovered?.id);
-        const point = line && hovered ? line.kind === 'fit' ? interpolatedObservation(line.observations, hovered.timestamp, 'log') : nearestObservation(line.observations, hovered.timestamp) : null;
-        if (!line || !point) return null;
-        const millions = line.key === 'sales' || line.key === 'pretaxProfit';
-        const currency = line.key === 'close' ? study.priceCurrency : study.financialCurrency;
-        const value = new Intl.NumberFormat('en-US', { ...(currency ? { style: 'currency' as const, currency, currencyDisplay: 'narrowSymbol' as const } : {}), minimumFractionDigits: millions ? 0 : 2, maximumFractionDigits: millions ? 0 : 2 }).format(millions ? point.value / 1_000_000 : point.value);
-        return <div className="overlay-tooltip"><span>{new Date(point.timestamp).getUTCFullYear()}</span><b style={{ color: line.color }}>{value}{millions ? 'M' : ''}</b></div>;
-      }}/>
-      {spaced.filter(metric => metric.key !== 'close' && lineVisible(`${metric.key}:fit`)).map(metric => <Line key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={selected === `${metric.key}:fit` ? 3 : 2} strokeOpacity={selected === `${metric.key}:fit` ? 0.65 : 0.4} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:fit` as ChartLineId)}/>)}
-      {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={selected === `${metric.key}:actual` ? 3.5 : metric.key === 'close' ? 1.6 : 3} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : { r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color }} activeDot={false} connectNulls={false} isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:actual`)}/>)}
-      <LineHoverLayer lines={hoverLines} hovered={hovered} onHover={hoverLine} onSelect={setSelected}/>
+      {spaced.filter(metric => metric.key !== 'close' && lineVisible(`${metric.key}:fit`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={selected === `${metric.key}:fit` ? 3 : 2} strokeOpacity={selected === `${metric.key}:fit` ? 0.65 : 0.4} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:fit` as ChartLineId)}/>)}
+      {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={selected === `${metric.key}:actual` ? 3.5 : metric.key === 'close' ? 1.6 : 3} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : { r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color }} activeDot={false} connectNulls={false} isAnimationActive={false} style={{ cursor: 'pointer' }} onClick={() => inspectLine(`${metric.key}:actual`)}/>)}
+      <LineHoverLayer lines={hoverLines} onSelect={setSelected} onMove={(key, delta) => setOffsets(current => ({ ...current, [key]: (current[key] ?? 0) + delta }))}/>
     </LineChart></ResponsiveContainer></div> : <div className="chart-empty">{lines.length ? 'All lines are hidden. Choose Show all to restore the chart.' : 'No comparable history is available. Refresh to try again.'}</div>}
     <div className="chart-footnote"><span className="split-status"><i/>Split-normalized EPS & price</span><span>Translucent lines: log-linear regression · Annual financials · Daily closing prices</span></div>
     <p className="overlay-note">Each line has its own logarithmic scale and vertical offset to make its trend clear. Compare direction and shape; slopes do not compare growth rates. Hover for actual values. Missing annual values remain gaps.</p>
