@@ -373,7 +373,18 @@ function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (num
   </svg>;
 }
 
-function ManagementTable({ annual, controls }: { annual: AnnualRow[]; controls: TableExclusions }) {
+function ManagementTable({ annual }: { annual: AnnualRow[] }) {
+  const [excludedYears, setExcludedYears] = useState<number[]>([]);
+  const [excludedValues, setExcludedValues] = useState<string[]>([]);
+  const controls: TableExclusions = {
+    scope: 'management', excludedYears, excludedValues,
+    onToggleYear: year => setExcludedYears(current => current.includes(year) ? current.filter(value => value !== year) : [...current, year]),
+    onToggleValue: (metric, year) => {
+      const id = valueId(metric, year);
+      setExcludedValues(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+    },
+    onResetExclusions: () => { setExcludedYears([]); setExcludedValues([]); },
+  };
   const rows = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
   const definitions = [
     { key: 'pretaxMargin' as const, name: '% Pre-Tax Profit on Sales', lowerIsBetter: false },
@@ -383,6 +394,7 @@ function ManagementTable({ annual, controls }: { annual: AnnualRow[]; controls: 
   const percentage = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
   return <section className="financial-table-section fundamentals management" aria-labelledby="management-table-title">
     <div className="fundamentals-title"><h2 id="management-table-title">Evaluate Management</h2><span>Profitability & capital</span></div>
+    <ExclusionHelp controls={controls}/>
     <div className="financial-table-scroll"><table>
       <caption className="sr-only">Annual management ratios, latest five-year averages, and historical trends.</caption>
       <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd}><ExclusionYear year={fiscalYear(row)} controls={controls}/></th>)}<th scope="col" className="calculated-column">5 Yr Avg</th><th scope="col">Trend</th></tr></thead>
@@ -509,7 +521,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>
       <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
       <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls}/>
-      <ManagementTable annual={annual} controls={controls}/>
+      <ManagementTable key={`management-${study.id}`} annual={annual}/>
     </div>
     <div id="panel-valuation" role="tabpanel" aria-labelledby="tab-valuation" hidden={tab !== 'valuation'}><ValuationPage key={`valuation-${study.id}`} study={study} annual={annual} quote={quote} controls={controls}/></div>
     <footer className="study-footer"><div><strong>Sources</strong><a href={study.sources.sec.url} target="_blank" rel="noreferrer">SEC Company Facts ↗</a><span>{study.sources.sec.retrievedAt ? `Retrieved ${new Date(study.sources.sec.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><div><strong>Price history</strong><a href={study.sources.yfinance.url} target="_blank" rel="noreferrer">Yahoo Finance via yfinance ↗</a><span>{study.sources.yfinance.retrievedAt ? `Retrieved ${new Date(study.sources.yfinance.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><p>Financials cover the latest ten available full fiscal years. Prices cover the trailing decade where available and use Yahoo’s split-adjusted close, without dividend adjustment. Refresh creates a new study snapshot.</p></footer>
