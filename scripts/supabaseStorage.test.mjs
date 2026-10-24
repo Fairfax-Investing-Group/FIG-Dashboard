@@ -22,10 +22,13 @@ test('Postgres study migration isolates owners and stores only explicit inputs',
       insert into auth.users values ('${alice}'), ('${bob}');
     `);
     await db.exec(await readFile(new URL('../supabase/migrations/202610240001_user_studies.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/202610240002_study_made_at.sql', import.meta.url), 'utf8'));
     const asUser = async id => db.exec(`reset role; set role authenticated; set request.jwt.claim.sub = '${id}';`);
     await asUser(alice);
-    const { rows: [saved] } = await db.query("insert into public.studies(ticker,cik,eps_growth_percent,manual_low_price,high_pe_years,excluded_years) values ('AAPL',320193,12,0,5,array[2020]) returning *");
+    const { rows: [saved] } = await db.query("insert into public.studies(ticker,cik,eps_growth_percent,manual_low_price,high_pe_years,excluded_years,study_made_at) values ('AAPL',320193,12,0,5,array[2020],'2026-10-01T12:00:00Z') returning *");
     assert.equal(saved.user_id, alice);
+    assert.equal(new Date(saved.study_made_at).toISOString(), '2026-10-01T12:00:00.000Z');
+    assert.ok(new Date(saved.created_at) >= new Date(saved.study_made_at));
     assert.equal(Number(saved.eps_growth_percent), 12);
     assert.equal(Number(saved.manual_low_price), 0, 'Explicit zero must remain a user value');
     assert.equal(saved.annual_dividend, null, 'Calculated defaults are not stored');
@@ -38,6 +41,10 @@ test('Postgres study migration isolates owners and stores only explicit inputs',
     await assert.rejects(db.exec("insert into public.studies(ticker,cik,eps_growth_percent) values ('AAPL',320193,'Infinity');"), /studies_finite_numbers/);
     await assert.rejects(db.exec("insert into public.studies(ticker,cik,high_pe_years) values ('AAPL',320193,7);"), /check constraint/);
     await assert.rejects(db.exec("insert into public.studies(ticker,cik,\"AnnualData\") values ('AAPL',320193,'{}');"), /does not exist/);
+    await assert.rejects(db.exec(`update public.studies set study_made_at = now() where id = '${saved.id}';`), /permission denied/);
+    const afterSave = (await db.query(`select * from public.studies where id = '${saved.id}'`)).rows[0];
+    assert.equal(String(afterSave.study_made_at), String(saved.study_made_at));
+    assert.ok(new Date(afterSave.updated_at) >= new Date(saved.updated_at));
     await asUser(bob);
     assert.equal((await db.query(`select * from public.studies where id = '${saved.id}'`)).rows.length, 0);
     assert.equal((await db.query(`update public.studies set notes = 'Other user' where id = '${saved.id}' returning id`)).rows.length, 0);

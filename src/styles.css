@@ -915,3 +915,22 @@ body {
     linear-gradient(90deg, rgba(38,74,112,.022) 1px, transparent 1px);
   background-size:32px 32px;
 }
+
+/* Study saves keep timestamps next to the explicit save action. */
+.study-save { display:flex; flex-wrap:wrap; align-items:center; gap:8px; max-width:420px; }
+.study-save > span { font-size:11px; color:#64748b; }
+.study-header-actions { flex-wrap:wrap; }
+.saved-studies { margin:10px 24px 24px; }
+.saved-studies h2 { margin:0; font-size:11px; font-weight:600; }
+.saved-studies-table th,.saved-studies-table td { padding:8px 11px; text-align:left; font-size:11px; }
+.saved-studies-table td:last-child { text-align:right; }
+.saved-studies-table button { border:1px solid #cbd5e1; border-radius:5px; background:#f8fafc; padding:5px 10px; cursor:pointer; font-size:11px; }
+.saved-studies-table button:disabled { opacity:.65; cursor:default; }
+.saved-study-title { display:block; color:#64748b; font-size:10px; margin-top:3px; }
+.saved-studies > p[role=alert] { padding:0 11px; color:#a52828; font-size:12px; }
+@media(max-width:800px) { .saved-studies { margin-inline:12px; } }
+.study-nav .study-header-actions { flex-wrap:wrap; }
+.study-save { position:relative; }
+.study-save button:disabled { opacity:.65; cursor:default; }
+.study-save-login { position:absolute; top:calc(100% + 8px); right:0; z-index:20; width:min(320px,calc(100vw - 32px)); padding:16px; background:white; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 8px 24px #172b4d20; }
+.study-save-login .home-login-form { display:flex; height:auto; max-height:none; overflow:visible; padding:0; }

@@ -24,17 +24,23 @@ npm run dev
 
 The default identifies this local research app. SEC may block requests without adequate contact identification or rate-limit an IP; the UI reports upstream failures and lets you retry. No API keys are required for SEC/Yahoo financial requests. Supabase login uses the public project settings described below. Set `API_PORT` to use another backend port; the Vite proxy uses the same value.
 
-## Supabase login and study-input infrastructure
+## Supabase login and saved studies
 
 The homepage and `#/login` support Supabase email/password authentication,
 session restoration, and logout. Set `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local` (see `.env.example`). Apply
 `supabase/migrations/202610240001_user_studies.sql` in your project's SQL Editor.
 
-Cloud storage contains only user-entered overrides, selections, notes, company
-identifiers and ownership metadata. Provider data stays in the local research
-pipeline. The typed repository and per-user RLS policies are ready for future
-Save/Open integration; no autosave or cloud study UI is enabled yet.
+Run `supabase/migrations/202610240002_study_made_at.sql` after the first migration.
+Use **Save study** on a company page to store your forecasts, valuation overrides,
+and excluded data points. Repeated saves update the same record. Saved studies
+appear on Company search after login; opening one restores its inputs and fetches
+fresh provider data. The original study date, first-save date, and latest-save
+date are stored separately.
+
+Cloud storage contains only user-entered overrides, selections, company identifiers,
+dates and ownership metadata. Provider data stays in the local research pipeline.
+Saving is explicit; there is no autosave.
 See [Supabase setup and storage contract](docs/supabase.md).
 
 ## What a study shows
@@ -47,7 +53,7 @@ See [Supabase setup and storage contract](docs/supabase.md).
 
 Each creation/refresh makes new upstream requests and saves a separate snapshot in `.data/studies.sqlite3` (ignored by Git). Reloading a study's `#/study/<id>` URL reads that snapshot rather than silently fetching new data. Refresh creates and opens a new snapshot. These local URLs work while this backend and its database are available; snapshots are not cloud-shared. Set `STUDY_DB` to change the database path.
 
-Search starts the first match's speculative request immediately and the next four after 500 ms without typing. After 25 ms without typing, the closest match's Fundamentals page also mounts hidden with its known identity and live quote. Selecting that match reveals the same mounted page; only one page is prepared at a time. Selecting a company reuses its work and discards the other selections. The browser receives a slim study projection; complete data remains available through the default API and export. See [loading implementation and measured results](docs/loading-performance.md).
+Search starts the first match's speculative request immediately and the next four after 500 ms without typing. After 25 ms without typing, the closest match's Fundamentals page also mounts hidden with its known identity and live quote. Once that page mounts, a 500 ms timer prepares the next four matches' pages. Selecting any prepared match reveals its mounted page and removes all other prepared pages. Changing or clearing the search cancels pending page preparation. Selecting a company reuses its work and discards the other selections. The browser receives a slim study projection; complete data remains available through the default API and export. See [loading implementation and measured results](docs/loading-performance.md).
 
 ## Normalized study JSON
 

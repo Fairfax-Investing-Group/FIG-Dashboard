@@ -1,18 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import type { Study } from './types';
 import { currentValuation, valuationAverage, type ValuationRow } from './valuationMath';
+import { draftFromValues, draftToValues, defaults, type Draft } from './lib/valuationInputs';
+import { useStudyInputs, useStudyInputSection } from './StudyInputsContext';
 import { assumption, riskReward, type LowPriceMethod, type ZoneSplit } from './riskRewardMath';
 
-type Draft = {
-  highMethod: 'pe' | 'manual'; manualHigh: string;
-  highPE: string; lowPE: string; lowEPSMode: 'auto' | 'manual'; lowEPS: string;
-  highPEYears: 5 | 10 | null; lowPEYears: 5 | 10 | null;
-  lowMethod: LowPriceMethod; manualLow: string; zoneSplit: ZoneSplit;
-  dividend: string | null; payout: string | null; highYield: string | null;
-  desiredRatio: string | null; targetReturn: string | null;
-};
-const defaults: Draft = { highMethod: 'pe', manualHigh: '', highPE: '', lowPE: '', highPEYears: null, lowPEYears: null, lowEPSMode: 'auto', lowEPS: '', lowMethod: 'pe', manualLow: '', zoneSplit: '25-50-25',
-  dividend: null, payout: null, highYield: null, desiredRatio: null, targetReturn: null };
 const number = (value: number | null, digits = 2) => value === null ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 const percent = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
 const sourceInput = (value: string | null, source: number | null) => value ?? (source === null ? '' : String(source));
@@ -33,7 +25,9 @@ export default function RiskReward({ study, current, history, highEPSForecast, e
   study: Study; current: ReturnType<typeof currentValuation>; history: ValuationRow[];
   highEPSForecast: number | null; epsForecastRate: string; onEditEPSForecast: () => void;
 }) {
-  const [draft, setDraft] = useState<Draft>({ ...defaults });
+  const inputs = useStudyInputs();
+  const [draft, setDraft] = useState<Draft>(() => draftFromValues(inputs?.initial));
+  useStudyInputSection('valuation', draftToValues(draft));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(previous => ({ ...previous, [key]: value }));
   const five = valuationAverage(history, 5);
   const ten = valuationAverage(history, 10);

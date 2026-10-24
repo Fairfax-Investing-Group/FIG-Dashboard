@@ -57,7 +57,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
               return <main data-study={props.study.id}><h1>{props.study.company.name}</h1><input aria-label="Forecast" value={edit} onChange={e=>setEdit(e.target.value)}/><span data-status>{props.detailsStatus}</span><span data-primary>{props.fundamentalsStatus}</span><button onClick={props.onBack}>Back</button><button onClick={props.onRetryDetails}>Retry details</button></main>;
             }`
           : args.path === './SearchPage'
-            ? `import React from 'react'; export default function Search({onSelect,onPreload,onPreparePage}) { const company={ticker:'TEST',cik:123,name:'Test company'}; return <><button onClick={()=>{onPreload(company);onPreparePage(company)}}>Highlight result</button><button onClick={()=>onSelect(company)}>Create study</button></>; }`
+            ? `import React from 'react'; export default function Search({onSelect,onPreload,onPreparePages}) { const company={ticker:'TEST',cik:123,name:'Test company'}; return <><button onClick={()=>{onPreload(company);onPreparePages([{...company,cik:999,ticker:'OTHER',name:'Other company'},company,...[2,3,4].map(i=>({...company,cik:i,ticker:'TEST'+i}))])}}>Highlight result</button><button onClick={()=>onSelect(company)}>Create study</button></>; }`
             : `export default function Login() { return null; }` }));
       },
     }] });
@@ -74,7 +74,8 @@ test('Fundamentals mounts before completion; background retries and merges prese
     const preloadGroup = JSON.parse(calls[0].options.body).preloadGroup;
     assert.ok(preloadGroup);
     assert.deepEqual(JSON.parse(calls[0].options.body), { ticker: 'TEST', cik: 123, preloadGroup, priority: 0 });
-    const preparedPage = document.querySelector('[data-study]');
+    assert.equal(document.querySelectorAll('[data-study]').length, 5);
+    const preparedPage = [...document.querySelectorAll('[data-study]')].find(page => page.querySelector('h1').textContent === 'Test company');
     assert.ok(preparedPage.closest('[hidden]'), 'Prepared page stays hidden while search is open');
     const preparedId = preparedPage.dataset.study;
     assert.equal(calls.filter(call => call.url === '/api/studies/preload/clear').length, 0, 'Preparation must not discard preloads or start completion');
@@ -83,6 +84,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
     assert.equal(calls.filter(call => call.url === '/api/studies?stage=fundamentals').length, 1);
     assert.equal(document.querySelector('[data-study]'), preparedPage, 'Selection reveals the mounted page without rebuilding it');
     assert.equal(firstId, preparedId);
+    assert.equal(document.querySelectorAll('[data-study]').length, 1, 'Opening a secondary match removes all four unselected pages');
     assert.equal(preparedPage.closest('[hidden]'), null);
     const cleanup = calls.filter(call => call.url === '/api/studies/preload/clear');
     assert.equal(cleanup.length, 1, 'Opening Fundamentals immediately clears the unselected preloads');

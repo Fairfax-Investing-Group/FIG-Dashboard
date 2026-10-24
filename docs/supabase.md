@@ -26,7 +26,10 @@ it does not add public registration or a password-recovery flow.
 
 Run the entire contents of
 [`202610240001_user_studies.sql`](../supabase/migrations/202610240001_user_studies.sql)
-in the project's Supabase SQL Editor once. If using the Supabase CLI with a linked
+in the project's Supabase SQL Editor once. Then run
+[`202610240002_study_made_at.sql`](../supabase/migrations/202610240002_study_made_at.sql)
+to add the immutable original study date. If the first migration is already
+applied, run only the second migration. If using the Supabase CLI with a linked
 project, `supabase db push` applies the same versioned migration.
 
 The browser publishable key cannot create database tables or apply migrations.
@@ -43,7 +46,15 @@ service-role key in the frontend or the Python backend.
   desired upside/downside ratio, and target return.
 - User-selected calculation methods, zone split, and 5/10-year P/E links.
 - Excluded years/values for Fundamentals/Valuation and, separately, Management.
-- Database-generated record ID, owner ID, and creation/update timestamps.
+- Original study creation time (`study_made_at`), taken from the opened study.
+- Database-generated record ID, owner ID, first-save time (`created_at`), and
+  latest-save time (`updated_at`). The original date and first-save time stay
+  unchanged on subsequent saves.
+
+The original maker is stored as `user_id`, assigned from `auth.uid()` when the
+study is first saved. Clients cannot supply or change it. Both the saved-study
+list and the open study show the maker's current account email (falling back to
+the stored user ID). The ID remains the stable identity if the email changes.
 
 **NULL means automatic:** do not save a calculated default simply because it is
 visible in an input. For example, an untouched annual dividend stays NULL; a
@@ -56,12 +67,13 @@ have no numeric defaults. The database rejects nonfinite numbers.
 There is no cloud column for SEC facts, Yahoo data, annual/quarterly statements,
 prices, calculated averages, chart series, or complete StudyDocument JSON.
 `validateStudyValues()` rejects unknown keys at runtime, including ownership and
-timestamps. SQL grants also prevent clients assigning ownership or timestamps.
+server-owned timestamps. SQL grants prevent clients assigning ownership or
+save timestamps, or changing the original study date after insertion.
 
 Existing `.data/studies.sqlite3` files remain local provider snapshots used by the
 research API. They are separate from Supabase and are not uploaded or migrated.
 
-## Repository for future Save/Open integration
+## Save and open
 
 `src/lib/studyRepository.ts` exposes `createStudyRepository()` with `list()`,
 `get(id)`, `create(values)`, `update(id, patch)`, and `remove(id)` methods. Each
@@ -80,15 +92,24 @@ const saved = await studies.create({
 await studies.update(saved.id, { manual_low_price: 0 });
 ```
 
-This is **infrastructure only**. No study page currently calls the repository;
-there is no Save/Open UI or autosave, and preloads never create Supabase rows.
-Future Save/Open should gather explicit edits from component draft state and
-fetch provider data independently when reopening the selected company.
+The study page's **Save study** button gathers explicit forecasts, valuation
+assumptions, and both financial and management exclusions. Save again to update
+the same cloud record. Refreshing a saved study retains its inputs and cloud
+identity while replacing provider data. A logged-out user can sign in beside the save action
+without leaving the study. Invalid input or failed writes leave the draft intact
+and display an error. There is no autosave; preloads never create Supabase rows.
+
+The homepage's **Saved studies** list is private to the signed-in user. Opening
+a record restores all stored inputs into a fresh local company snapshot. Null
+overrides continue using fresh calculated defaults, and linked P/E periods are
+recalculated from fresh history. The saved original date stays unchanged.
+Saving a new search result creates a separate saved record, even for the same
+company. The page shows the original study date and latest save date.
 
 ## Focused checks
 
 ```sh
-node --test scripts/supabaseAuth.test.mjs scripts/studyRepository.test.mjs scripts/supabaseStorage.test.mjs
+node --test scripts/supabaseAuth.test.mjs scripts/studyRepository.test.mjs scripts/supabaseStorage.test.mjs scripts/saveStudy.test.mjs
 npm run build
 ```
 

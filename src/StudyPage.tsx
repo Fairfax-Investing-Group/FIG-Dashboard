@@ -10,6 +10,10 @@ import ValuationPage from './ValuationPage';
 import NewsPage from './NewsPage';
 import { ExclusionYear, ExclusionValue, ExclusionHelp, isValueExcluded, metricExcludedYears, valueId, type TableExclusions } from './ExclusionControls';
 
+import { StudyInputsProvider, useStudyInputs, useStudyInputSection, inputNumber } from './StudyInputsContext';
+import type { SavedStudy } from './lib/studyInputs';
+import SaveStudy from './SaveStudy';
+
 const metrics: { key: FinancialChartKey; title: string; color: string; note: string }[] = [
   { key: 'sales', title: 'Sales', color: '#2563eb', note: 'Annual revenue' },
   { key: 'eps', title: 'Earnings per share', color: '#7c3aed', note: 'Diluted EPS' },
@@ -379,8 +383,10 @@ function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (num
 }
 
 const ManagementTable = memo(function ManagementTable({ annual, pending = false }: { annual: AnnualRow[]; pending?: boolean }) {
-  const [excludedYears, setExcludedYears] = useState<number[]>([]);
-  const [excludedValues, setExcludedValues] = useState<string[]>([]);
+  const inputs = useStudyInputs();
+  const [excludedYears, setExcludedYears] = useState<number[]>(() => inputs?.initial?.management_excluded_years ?? []);
+  const [excludedValues, setExcludedValues] = useState<string[]>(() => inputs?.initial?.management_excluded_values ?? []);
+  useStudyInputSection('management', { management_excluded_years: excludedYears, management_excluded_values: excludedValues });
   const controls: TableExclusions = {
     scope: 'management', excludedYears, excludedValues,
     onToggleYear: year => setExcludedYears(current => current.includes(year) ? current.filter(value => value !== year) : [...current, year]),
@@ -490,23 +496,36 @@ const CompanyHeader = memo(function CompanyHeader({ study, quote, quoteStatus, p
 const emptyYears: number[] = [];
 const emptyValues: string[] = [];
 
-export default function StudyPage({ study, onBack, onRefresh, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails, fundamentalsStatus = 'idle', fundamentalsError, onRetryFundamentals }: {
-  study: Study; onBack: () => void; onRefresh: () => void;
+type StudyPageProps = {
+  study: Study; onBack: () => void; onRefresh: (savedInputs?: SavedStudy) => void;
   fundamentalsStatus?: 'idle' | 'loading' | 'error'; fundamentalsError?: string | null; onRetryFundamentals?: () => void;
   onFundamentalsReady?: (id: string) => void; detailsStatus?: 'idle' | 'loading' | 'error'; onRetryDetails?: () => void;
-}) {
+} & { initialSavedStudy?: SavedStudy; active?: boolean };
+export default function StudyPage(props: StudyPageProps) {
+  return <StudyInputsProvider initial={props.initialSavedStudy}><StudyPageContent {...props}/></StudyInputsProvider>;
+}
+function StudyPageContent({ study, onBack, onRefresh, onFundamentalsReady, detailsStatus = 'idle', onRetryDetails, fundamentalsStatus = 'idle', fundamentalsError, onRetryFundamentals, active = true }: StudyPageProps) {
   useEffect(() => { onFundamentalsReady?.(study.id); }, [study.id, onFundamentalsReady]);
   const pending = fundamentalsStatus !== 'idle';
   const tabs = [{ key: 'fundamentals', label: 'Analyzing Fundamentals' }, { key: 'valuation', label: 'Valuation' }, { key: 'news', label: 'Recent News' }] as const;
   const [tab, setTab] = useState<(typeof tabs)[number]['key']>('fundamentals');
-  const [forecastsByStudy, setForecastsByStudy] = useState<Record<string, FinancialForecasts>>({});
+  const inputs = useStudyInputs();
+  const refresh = () => {
+    const record = inputs?.record.current;
+    onRefresh(record ? { ...record, ...inputs?.collect() } : undefined);
+  };
+  const [forecastsByStudy, setForecastsByStudy] = useState<Record<string, FinancialForecasts>>(() => ({ [study.id]: {
+    sales: inputs?.initial?.sales_growth_percent == null ? '' : String(inputs.initial.sales_growth_percent),
+    eps: inputs?.initial?.eps_growth_percent == null ? '' : String(inputs.initial.eps_growth_percent),
+  } }));
   const forecasts = forecastsByStudy[study.id] ?? { sales: '', eps: '' };
   const updateForecast = (key: keyof FinancialForecasts, value: string) => setForecastsByStudy(current => ({ ...current, [study.id]: { ...(current[study.id] ?? { sales: '', eps: '' }), [key]: value } }));
   const { quote, quoteStatus } = useMarketQuote(study.company.ticker);
-  const [yearExclusions, setYearExclusions] = useState<Record<string, number[]>>({});
+  const [yearExclusions, setYearExclusions] = useState<Record<string, number[]>>(() => ({ [study.id]: inputs?.initial?.excluded_years ?? [] }));
   const excludedYears = yearExclusions[study.id] ?? emptyYears;
-  const [valueExclusions, setValueExclusions] = useState<Record<string, string[]>>({});
+  const [valueExclusions, setValueExclusions] = useState<Record<string, string[]>>(() => ({ [study.id]: inputs?.initial?.excluded_values ?? [] }));
   const excludedValues = valueExclusions[study.id] ?? emptyValues;
+  useStudyInputSection('fundamentals', { sales_growth_percent: inputNumber(forecasts.sales), eps_growth_percent: inputNumber(forecasts.eps), excluded_years: excludedYears, excluded_values: excludedValues });
   const toggleValue = useCallback((metric: string, year: number) => setValueExclusions(current => {
     const values = current[study.id] ?? [], id = valueId(metric, year);
     return { ...current, [study.id]: values.includes(id) ? values.filter(value => value !== id) : [...values, id] };
@@ -519,9 +538,10 @@ export default function StudyPage({ study, onBack, onRefresh, onFundamentalsRead
   }), [study.id]);
   const controls: TableExclusions = { excludedYears, excludedValues, onToggleYear: toggleYear, onToggleValue: toggleValue, onResetExclusions: resetExclusions };
   useEffect(() => {
+    if (!active) return;
     document.title = `${study.company.ticker} · Stock Study`;
     return () => { document.title = 'Stock Search'; };
-  }, [study.company.ticker]);
+  }, [study.company.ticker, active]);
   const normalized = study.epsAdjustment?.status === 'normalized';
   const annual = useMemo(() => {
     const offset = reportingYearOffset(study.annual);
@@ -541,12 +561,12 @@ export default function StudyPage({ study, onBack, onRefresh, onFundamentalsRead
         setTab(next);
         document.getElementById(`tab-${next}`)?.focus();
       }
-    }}>{item.label}</button>)}</div><div className="study-header-actions">{pending ? <span className="export-button" aria-disabled="true">Export JSON ↓</span> : <a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a>}<button className="primary-button" disabled={fundamentalsStatus === 'loading'} onClick={onRefresh}>↻ Refresh study</button></div></nav>
+    }}>{item.label}</button>)}</div><div className="study-header-actions">{pending ? <span className="export-button" aria-disabled="true">Export JSON ↓</span> : <a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a>}<button className="primary-button" disabled={fundamentalsStatus === 'loading'} onClick={refresh}>↻ Refresh study</button><SaveStudy study={study}/></div></nav>
     <CompanyHeader study={study} quote={quote} quoteStatus={quoteStatus} pending={pending}/>
     {fundamentalsStatus === 'error' && <aside className="study-background-status" role="alert">{fundamentalsError ?? 'Financial data could not be loaded.'} <button type="button" className="text-button" onClick={onRetryFundamentals}>Retry</button></aside>}
     {detailsStatus === 'error' && <aside className="study-background-status" role="alert">Additional study data could not be loaded. Your fundamentals remain available. <button type="button" className="text-button" onClick={onRetryDetails}>Retry</button></aside>}
-    {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={onRefresh}>Retry both sources</button>}</aside>}
-    {!pending && !study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
+    {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && <button className="text-button" onClick={refresh}>Retry both sources</button>}</aside>}
+    {!pending && !study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={refresh}>Refresh study to normalize EPS</button>.</aside>}
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>
       <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} pending={pending} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
       <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls} pending={pending} forecasts={forecasts} onForecastChange={updateForecast}/>
