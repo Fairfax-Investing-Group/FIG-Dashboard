@@ -53,3 +53,20 @@ test('missing values and normalization status survive conversion', () => {
 test('an unsupported contract version fails explicitly', () => {
   assert.throws(() => studyView({ ...document(), SchemaVersion: 2 }), /Unsupported study data version/);
 });
+
+
+test('management ratios convert decimal fractions once and preserve missing fields', () => {
+  const input = document();
+  Object.assign(input.AnnualData[0], { PtpOnSales: 0.268, ROE: 0.144, DTC: 0.028 });
+  const row = studyView(input).annual[0];
+  assert.equal(row.pretaxMargin.toFixed(1), '26.8');
+  assert.equal(row.returnOnEquity.toFixed(1), '14.4');
+  assert.equal(row.debtToCapital.toFixed(1), '2.8');
+  delete input.AnnualData[0].PtpOnSales;
+  delete input.AnnualData[0].ROE;
+  input.AnnualData[0].DTC = null;
+  const missing = studyView(input).annual[0];
+  assert.equal(missing.pretaxMargin.toFixed(1), '26.8');
+  assert.equal(missing.returnOnEquity, null);
+  assert.equal(missing.debtToCapital, null);
+});

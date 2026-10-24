@@ -31,3 +31,9 @@ export function fiveYearEstimate(latest: number | null, forecast: string): numbe
   const result = latest * Math.pow(1 + rate / 100, 5);
   return Number.isFinite(result) ? result : null;
 }
+
+/** Average only available observations within the latest five displayed fiscal years. */
+export function fiveYearAverage(values: (number | null | undefined)[]): number | null {
+  const available = values.slice(-5).filter((value): value is number => value != null && Number.isFinite(value));
+  return available.length ? available.reduce((sum, value) => sum + value, 0) / available.length : null;
+}

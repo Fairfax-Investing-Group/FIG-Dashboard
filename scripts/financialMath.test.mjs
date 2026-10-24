@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = readFileSync(new URL('../src/financialMath.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
-const { annualGrowth, fiveYearEstimate, logLinearRegression } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { annualGrowth, fiveYearEstimate, fiveYearAverage, logLinearRegression } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const points = values => values.map((value, index) => ({ periodEnd: `${2016 + index}-12-31`, value }));
 
 test('log-linear regression matches all three reference growth percentages', () => {
@@ -60,4 +60,13 @@ test('regression fit uses all observations and preserves missing-year gaps', () 
   assert.equal(gapped.fitted.length, 2);
   assert.equal(gapped.fitted[1].periodEnd, '2018-12-31');
   assert.equal(logLinearRegression(points([100, 0, 121])), null);
+});
+
+
+test('five-year averages use the latest five years without substituting earlier missing values', () => {
+  assert.equal(fiveYearAverage([999, 10, 20, 30, 40, 50]), 30);
+  assert.equal(fiveYearAverage([999, 0, null, 20, undefined, 40]), 20);
+  assert.equal(fiveYearAverage([999, null, null, null, null, null]), null);
+  assert.equal(fiveYearAverage([]), null);
+  assert.equal(fiveYearAverage([NaN, Infinity]), null);
 });

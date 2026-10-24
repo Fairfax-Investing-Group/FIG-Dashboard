@@ -9,6 +9,9 @@ export type AnnualRow = {
   epsReported?: number | null;
   epsSplitFactor?: number | null;
   pretaxProfit: number | null;
+  pretaxMargin?: number | null;
+  returnOnEquity?: number | null;
+  debtToCapital?: number | null;
   salesSource: FactSource | null;
   epsSource: FactSource | null;
   pretaxProfitSource: FactSource | null;
@@ -37,7 +40,7 @@ export type StudyDocument = {
   AnnualData: {
     FiscalYear: number; AsOfDataDate: string;
     Sales: number | null; EPS: number | null; PTP: number | null;
-    PtpOnSales: number | null; EPSSplitFactor: number | null;
+    PtpOnSales: number | null; ROE?: number | null; DTC?: number | null; EPSSplitFactor: number | null;
     Sources: Record<'Sales' | 'EPS' | 'PTP', {
       Concept: string; Filed: string; Accession: string | null;
       Unit: string; Start: string; End: string;

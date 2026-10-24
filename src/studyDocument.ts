@@ -12,7 +12,7 @@ export function studyView(document: StudyDocument): Study {
   });
   const adjustment = document.Metadata.EPSAdjustment;
   const amount = (value: number | null) => value === null ? null : value * 1_000_000;
-  const rate = (value: number | null) => value === null ? null : value * 100;
+  const rate = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? null : value * 100;
   return {
     id: document.Study.StudyID, createdAt: document.Study.DateCreated,
     company: { ticker: document.Company.Ticker, name: document.Company.CompanyName, cik: Number(document.Company.CentralIndexKey), exchange: document.Company.ExchangeType },
@@ -20,6 +20,8 @@ export function studyView(document: StudyDocument): Study {
     annual: document.AnnualData.map(row => ({
       periodEnd: row.AsOfDataDate, sales: amount(row.Sales), eps: row.EPS, pretaxProfit: amount(row.PTP),
       epsSplitFactor: row.EPSSplitFactor,
+      pretaxMargin: rate(row.PtpOnSales ?? (row.PTP !== null && row.Sales !== null && row.Sales !== 0 ? row.PTP / row.Sales : null)),
+      returnOnEquity: rate(row.ROE), debtToCapital: rate(row.DTC),
       salesSource: source(row.Sources.Sales), epsSource: source(row.Sources.EPS), pretaxProfitSource: source(row.Sources.PTP),
     })),
     prices: document.DailyPrices.map(point => ({ date: point.Date, close: point.Close })),

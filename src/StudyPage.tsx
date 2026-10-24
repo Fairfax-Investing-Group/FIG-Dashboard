@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
 import type { AnnualRow, Metric, Study } from './types';
-import { annualGrowth, fiveYearEstimate, logLinearRegression } from './financialMath';
+import { annualGrowth, fiveYearAverage, fiveYearEstimate, logLinearRegression } from './financialMath';
 import { nearestChartLine, nearestObservation, interpolatedObservation, stackChartLabels } from './chartInteraction';
 
 const metrics: { key: Metric; title: string; color: string; note: string }[] = [
@@ -338,6 +338,58 @@ function FinancialTable({ annual, study }: { annual: AnnualRow[]; study: Study }
   </section>;
 }
 
+function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (number | null)[]; name: string; lowerIsBetter?: boolean }) {
+  const available = values.flatMap((value, index) => value === null ? [] : [{ value, index }]);
+  if (available.length < 2) return <span className="trend-unavailable">—</span>;
+  const width = 152, height = 34, padding = 3;
+  const min = Math.min(0, ...available.map(point => point.value)), max = Math.max(0, ...available.map(point => point.value));
+  const x = (index: number) => padding + index / Math.max(1, values.length - 1) * (width - padding * 2);
+  const y = (value: number) => max === min ? height / 2 : height - padding - (value - min) / (max - min) * (height - padding * 2);
+  const segments: { value: number; index: number }[][] = [];
+  available.forEach(point => {
+    const segment = segments.at(-1);
+    if (segment && segment.at(-1)!.index === point.index - 1) segment.push(point);
+    else segments.push([point]);
+  });
+  const first = available[0], last = available.at(-1)!;
+  const improved = lowerIsBetter ? last.value <= first.value : last.value >= first.value;
+  const color = improved ? '#238454' : '#cc4850';
+  return <svg className="management-trend" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${name}: ${first.value.toFixed(1)}% to ${last.value.toFixed(1)}%`}>
+    <line x1={padding} x2={width - padding} y1={y(0)} y2={y(0)} stroke="#d5dfd9"/>
+    {segments.map((segment, index) => {
+      const path = segment.map((point, index) => `${index ? 'L' : 'M'}${x(point.index)},${y(point.value)}`).join(' ');
+      return <g key={index}><path d={`${path} L${x(segment.at(-1)!.index)},${y(0)} L${x(segment[0].index)},${y(0)} Z`} fill={color} fillOpacity={0.18}/><path d={path} stroke={color} strokeWidth={1.8} fill="none" strokeLinejoin="round"/></g>;
+    })}
+    {[first, last].map((point, index) => <circle key={index} cx={x(point.index)} cy={y(point.value)} r={2.2} fill={color}/>)}
+  </svg>;
+}
+
+function ManagementTable({ annual }: { annual: AnnualRow[] }) {
+  const rows = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+  const definitions = [
+    { key: 'pretaxMargin' as const, name: '% Pre-Tax Profit on Sales', lowerIsBetter: false },
+    { key: 'returnOnEquity' as const, name: '% Return on Equity', lowerIsBetter: false },
+    { key: 'debtToCapital' as const, name: '% Debt to Capital', lowerIsBetter: true },
+  ];
+  const percentage = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
+  return <section className="financial-table-section fundamentals management" aria-labelledby="management-table-title">
+    <div className="fundamentals-title"><h2 id="management-table-title">Evaluate Management</h2><span>Profitability & capital</span></div>
+    <div className="financial-table-scroll"><table>
+      <caption className="sr-only">Annual management ratios, latest five-year averages, and historical trends.</caption>
+      <thead><tr><th scope="col"><span className="sr-only">Metric</span></th>{rows.map(row => <th scope="col" key={row.periodEnd}>{row.periodEnd.slice(0, 4)}</th>)}<th scope="col" className="calculated-column">5 Yr Avg</th><th scope="col">Trend</th></tr></thead>
+      <tbody>{definitions.map(metric => {
+        const values = rows.map(row => row[metric.key] ?? null);
+        return <tr key={metric.key}><th scope="row">{metric.name}</th>
+          {rows.map((row, index) => <td key={row.periodEnd} className={index >= rows.length - 5 ? 'recent-ratio' : undefined}>{percentage(values[index])}</td>)}
+          <td className="calculated-column management-average">{percentage(fiveYearAverage(values))}</td>
+          <td className="management-trend-cell"><ManagementTrend values={values} name={metric.name} lowerIsBetter={metric.lowerIsBetter}/></td>
+        </tr>;
+      })}</tbody>
+    </table>{!rows.length && <p className="table-empty">Annual financials could not be loaded for this company.</p>}</div>
+    <p className="table-note">Pre-tax profit on sales = pre-tax profit ÷ sales. Return on equity = net income ÷ average beginning and ending common equity. Debt to capital = long-term debt ÷ (long-term debt + common equity). Shading marks the latest five fiscal years; averages use available values in those years. — means unavailable. Trend charts show all displayed years, with gaps for missing data.</p>
+  </section>;
+}
+
 export default function StudyPage({ study, onBack, onRefresh }: { study: Study; onBack: () => void; onRefresh: () => void }) {
   useEffect(() => {
     document.title = `${study.company.ticker} · Stock Study`;
@@ -357,6 +409,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
     {!study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study. <button className="text-button" onClick={onRefresh}>Refresh study to normalize EPS</button>.</aside>}
     <OverlayChart annual={annual} study={study}/>
     <FinancialTable key={study.id} annual={annual} study={study}/>
+    <ManagementTable annual={annual}/>
     <footer className="study-footer"><div><strong>Sources</strong><a href={study.sources.sec.url} target="_blank" rel="noreferrer">SEC Company Facts ↗</a><span>{study.sources.sec.retrievedAt ? `Retrieved ${new Date(study.sources.sec.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><div><strong>Price history</strong><a href={study.sources.yfinance.url} target="_blank" rel="noreferrer">Yahoo Finance via yfinance ↗</a><span>{study.sources.yfinance.retrievedAt ? `Retrieved ${new Date(study.sources.yfinance.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><p>Financials cover the latest ten available full fiscal years. Prices cover the trailing decade where available and use Yahoo’s split-adjusted close, without dividend adjustment. Refresh creates a new study snapshot.</p></footer>
   </main>;
 }
