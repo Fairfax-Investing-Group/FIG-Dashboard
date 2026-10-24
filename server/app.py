@@ -10,6 +10,7 @@ import threading
 
 from server.studies import ROOT, company_for, create_study, get_study
 from server.quotes import get_quote
+from server.news import get_news
 
 STUDY_SLOTS = threading.BoundedSemaphore(4)
 
@@ -34,6 +35,12 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == '/api/health':
             return self.json_response(200, {'status': 'ok'})
+        news_match = re.fullmatch(r'/api/news/([A-Z0-9][A-Z0-9.\-]{0,14})', path)
+        if news_match:
+            try:
+                return self.json_response(200, get_news(news_match.group(1)))
+            except Exception:
+                return self.json_response(503, {'error': 'Recent news is temporarily unavailable. Please try again.'})
         quote_match = re.fullmatch(r'/api/quotes/([A-Z0-9][A-Z0-9.\-]{0,14})', path)
         if quote_match:
             try:

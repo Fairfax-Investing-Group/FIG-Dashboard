@@ -456,3 +456,28 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .table-value-toggle del,.table-year-toggle del { text-decoration-thickness:1.5px; }
 .table-exclusion-help { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:7px 10px; background:#f7f9fb; font-size:10px; color:#7b8794; }
 .table-exclusion-help button { border:1px solid #dce3eb; background:white; border-radius:4px; padding:4px 8px; font:inherit; color:#526b7a; cursor:pointer; white-space:nowrap; }
+
+.news-section { margin-top:24px; padding:24px 28px; border:1px solid #e1e6eb; border-radius:12px; background:#fff; }
+.news-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; padding-bottom:20px; border-bottom:1px solid #e8edf1; }
+.news-eyebrow { color:#81909c; font-size:10px; letter-spacing:.1em; }
+.news-heading h2 { margin:6px 0; font-size:24px; color:#283e57; letter-spacing:-.03em; }
+.news-heading p,.news-updated { margin:0; color:#85909b; font-size:11px; }
+.news-refresh { border:1px solid #dce3eb; border-radius:6px; background:#f7f9fb; padding:8px 12px; color:#425a70; font:inherit; font-size:11px; cursor:pointer; white-space:nowrap; }
+.news-refresh:disabled { cursor:default; opacity:.6; }
+.news-refresh:focus-visible,.news-list a:focus-visible { outline:2px solid #2874d0; outline-offset:4px; }
+.news-list { list-style:none; margin:0; padding:0; }
+.news-list li { padding:22px 0; border-bottom:1px solid #edf0f3; }
+.news-meta { display:flex; flex-wrap:wrap; align-items:center; gap:8px 18px; font-size:10px; color:#8b949e; }
+.news-meta>span { color:#526980; font-weight:600; }
+.news-list h3 { margin:8px 0; font-size:17px; font-weight:600; line-height:1.45; letter-spacing:-.02em; }
+.news-list a { color:#2c4764; text-decoration:none; }
+.news-list a:hover { color:#075da8; text-decoration:underline; text-underline-offset:3px; }
+.news-copy>p { margin:0; color:#73808d; font-size:12px; line-height:1.75; max-width:100ch; }
+.news-message { padding:22px 0; font-size:12px; color:#7c8793; }
+.news-updated { padding-top:16px; }
+@media(max-width:640px) { .news-section { padding:18px 16px; } .news-heading h2 { font-size:21px; } .news-list h3 { font-size:15px; } }
+
+.news-list article { display:flex; align-items:flex-start; gap:20px; }
+.news-copy { flex:1; min-width:0; }
+.news-thumbnail { flex:none; width:112px; height:80px; object-fit:cover; border-radius:7px; background:#f0f3f6; }
+@media(max-width:640px) { .news-list article { gap:12px; } .news-thumbnail { width:80px; height:64px; } }

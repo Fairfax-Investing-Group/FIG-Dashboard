@@ -6,6 +6,7 @@ import { annualGrowth, fiveYearAverage, fiveYearEstimate, logLinearRegression } 
 import { nearestChartLine, nearestObservation, interpolatedObservation } from './chartInteraction';
 import { trailingFinancials } from './trailingFinancials';
 import ValuationPage from './ValuationPage';
+import NewsPage from './NewsPage';
 import { ExclusionYear, ExclusionValue, ExclusionHelp, isValueExcluded, metricExcludedYears, valueId, type TableExclusions } from './ExclusionControls';
 const fiscalYear = (row: AnnualRow) => row.fiscalYear ?? Number(row.periodEnd.slice(0, 4));
 
@@ -472,7 +473,8 @@ function CompanyHeader({ study, quote, quoteStatus }: { study: Study; quote: Mar
 }
 
 export default function StudyPage({ study, onBack, onRefresh }: { study: Study; onBack: () => void; onRefresh: () => void }) {
-  const [tab, setTab] = useState<'fundamentals' | 'valuation'>('fundamentals');
+  const tabs = [{ key: 'fundamentals', label: 'Analyzing Fundamentals' }, { key: 'valuation', label: 'Valuation' }, { key: 'news', label: 'Recent News' }] as const;
+  const [tab, setTab] = useState<(typeof tabs)[number]['key']>('fundamentals');
   const { quote, quoteStatus } = useMarketQuote(study.company.ticker);
   const [yearExclusions, setYearExclusions] = useState<Record<string, number[]>>({});
   const excludedYears = yearExclusions[study.id] ?? [];
@@ -500,10 +502,11 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
   }));
   const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);
   return <main className="study-page">
-    <nav className="study-nav" aria-label="Study navigation"><button className="back-button" onClick={onBack}>← Company search</button><div className="study-tabs" role="tablist" aria-label="Study sections">{([{ key: 'fundamentals', label: 'Analyzing Fundamentals' }, { key: 'valuation', label: 'Valuation' }] as const).map(item => <button key={item.key} id={`tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls={`panel-${item.key}`} tabIndex={tab === item.key ? 0 : -1} onClick={() => setTab(item.key)} onKeyDown={event => {
+    <nav className="study-nav" aria-label="Study navigation"><button className="back-button" onClick={onBack}>← Company search</button><div className="study-tabs" role="tablist" aria-label="Study sections">{tabs.map(item => <button key={item.key} id={`tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls={`panel-${item.key}`} tabIndex={tab === item.key ? 0 : -1} onClick={() => setTab(item.key)} onKeyDown={event => {
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
         event.preventDefault();
-        const next = event.key === 'Home' ? 'fundamentals' : event.key === 'End' ? 'valuation' : tab === 'fundamentals' ? 'valuation' : 'fundamentals';
+        const index = tabs.findIndex(entry => entry.key === item.key);
+        const next = tabs[event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length].key;
         setTab(next);
         document.getElementById(`tab-${next}`)?.focus();
       }
@@ -517,6 +520,7 @@ export default function StudyPage({ study, onBack, onRefresh }: { study: Study; 
       <ManagementTable key={`management-${study.id}`} annual={annual}/>
     </div>
     <div id="panel-valuation" role="tabpanel" aria-labelledby="tab-valuation" hidden={tab !== 'valuation'}><ValuationPage key={`valuation-${study.id}`} study={study} annual={annual} quote={quote} controls={controls}/></div>
+    <div id="panel-news" role="tabpanel" aria-labelledby="tab-news" hidden={tab !== 'news'}><NewsPage key={study.company.ticker} ticker={study.company.ticker} active={tab === 'news'}/></div>
     <footer className="study-footer"><div><strong>Sources</strong><a href={study.sources.sec.url} target="_blank" rel="noreferrer">SEC Company Facts ↗</a><span>{study.sources.sec.retrievedAt ? `Retrieved ${new Date(study.sources.sec.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><div><strong>Price history</strong><a href={study.sources.yfinance.url} target="_blank" rel="noreferrer">Yahoo Finance via yfinance ↗</a><span>{study.sources.yfinance.retrievedAt ? `Retrieved ${new Date(study.sources.yfinance.retrievedAt).toLocaleString()}` : 'Unavailable'}</span></div><p>Financials cover the latest ten available full fiscal years. Prices cover the trailing decade where available and use Yahoo’s split-adjusted close, without dividend adjustment. Refresh creates a new study snapshot.</p></footer>
   </main>;
 }
