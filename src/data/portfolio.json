@@ -286,7 +286,9 @@
           "date": "2026-10-23",
           "value": 364.49
         }
-      ]
+      ],
+      "sector": "Financial Services",
+      "marketCap": 8204649472
     },
     {
       "ticker": "EXLS",
@@ -561,7 +563,9 @@
           "date": "2026-10-23",
           "value": 42.3
         }
-      ]
+      ],
+      "sector": "Technology",
+      "marketCap": 6413208576
     },
     {
       "ticker": "MSFT",
@@ -836,7 +840,9 @@
           "date": "2026-10-23",
           "value": 524.51
         }
-      ]
+      ],
+      "sector": "Technology",
+      "marketCap": 3894773022720
     },
     {
       "ticker": "NVDA",
@@ -1111,7 +1117,9 @@
           "date": "2026-10-23",
           "value": 210.96
         }
-      ]
+      ],
+      "sector": "Technology",
+      "marketCap": 5094050889728
     },
     {
       "ticker": "RMD",
@@ -1386,7 +1394,9 @@
           "date": "2026-10-23",
           "value": 252.86
         }
-      ]
+      ],
+      "sector": "Healthcare",
+      "marketCap": 35562041344
     },
     {
       "ticker": "NOW",
@@ -1661,7 +1671,9 @@
           "date": "2026-10-23",
           "value": 158.96
         }
-      ]
+      ],
+      "sector": "Technology",
+      "marketCap": 164342710272
     },
     {
       "ticker": "ASTS",
@@ -1936,7 +1948,9 @@
           "date": "2026-10-23",
           "value": 39.79
         }
-      ]
+      ],
+      "sector": "Technology",
+      "marketCap": 15484975104
     },
     {
       "ticker": "TSM",
@@ -2211,7 +2225,9 @@
           "date": "2026-10-23",
           "value": 418.51
         }
-      ]
+      ],
+      "sector": "Technology",
+      "marketCap": 2170591248384
     },
     {
       "ticker": "GOOGL",
@@ -2486,7 +2502,9 @@
           "date": "2026-10-23",
           "value": 320.21
         }
-      ]
+      ],
+      "sector": "Communication Services",
+      "marketCap": 3916147458048
     },
     {
       "ticker": "EME",
@@ -2721,7 +2739,9 @@
           "date": "2026-10-23",
           "value": 647.66
         }
-      ]
+      ],
+      "sector": "Industrials",
+      "marketCap": 28568217600
     }
   ],
   "performance": [
