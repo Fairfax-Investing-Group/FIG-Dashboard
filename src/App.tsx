@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
+import LoginPage from './LoginPage';
 const StudyPage = lazy(() => import('./StudyPage'));
 import type { StudyDocument } from './types';
 import { studyView } from './studyDocument';
@@ -39,7 +40,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!route) { setStudyDocument(null); return; }
+    if (!route || route === '/login') { setStudyDocument(null); return; }
     const match = /^\/study\/([a-f0-9-]{36})$/.exec(route);
     if (!match) { setError('This study link is invalid. Return to search to create a study.'); return; }
     const cached = cache.current.get(match[1]);
@@ -91,6 +92,7 @@ export default function App() {
     window.location.hash = '';
   }
 
+  if (route === '/login') return <LoginPage/>;
   if (loading || error) return <main className="search-page state-page">
     <button className="back-button" onClick={backToSearch}>← Back to search</button>
     {loading ? <div role="status" className="loading-state"><div className="spinner"/><h1>{pending ? `Studying ${pending.ticker}` : 'Opening your study'}</h1><p>{pending ? 'Gathering annual and quarterly financials, prices, analyst estimates, and industry peers.' : 'Loading your saved study.'}</p><small>Expanded studies can take a few minutes. Your study will show any unavailable data.</small></div> : <div role="alert" className="error-state"><h1>Couldn’t open the study.</h1><p>{error}</p>{pending && <button className="primary-button" onClick={() => createStudy(pending)}>Try again</button>}</div>}

@@ -30,7 +30,7 @@ test('fetched and cached reports retain the full inputs for open FCF/share dots'
   let marketQuote = { currency: 'USD', regular: { price: 100, change: 2, percent: 2.04, time: '2021-08-02T20:00:00Z' }, postMarket: { price: 101.5, change: 1.5, percent: 1.5, time: '2021-08-02T22:00:00Z' }, retrievedAt: '2021-08-02T22:00:00Z' };
   globalThis.fetch = async url => { const isStudy = String(url).startsWith('/api/studies/'); if (isStudy) fetches++; return { ok: true, headers: { get: () => 'application/json' }, json: async () => isStudy ? documentData : String(url).startsWith('/api/quotes/') ? marketQuote : { data: [] } }; };
   const dir = await mkdtemp(new URL('../.data/app-test-', import.meta.url));
-  await build({ entryPoints: ['src/App.tsx'], outfile: `${dir}/App.mjs`, bundle: true, platform: 'node', format: 'esm', packages: 'external', jsx: 'automatic', define: { 'import.meta.env.BASE_URL': JSON.stringify('/') } });
+  await build({ entryPoints: ['src/App.tsx'], outfile: `${dir}/App.mjs`, bundle: true, platform: 'node', format: 'esm', packages: 'external', jsx: 'automatic', loader: { '.png': 'dataurl' }, define: { 'import.meta.env.BASE_URL': JSON.stringify('/') } });
   const React = await import('react');
   const { createRoot } = await import('react-dom/client');
   const { default: App } = await import(pathToFileURL(`${dir}/App.mjs`).href);

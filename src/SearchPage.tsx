@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import logo from './assets/fairfax-logo.png';
+const PortfolioDashboard = lazy(() => import('./PortfolioDashboard'));
 
 export type Company = { cik: number; name: string; ticker: string; exchange: string | null };
 type Directory = { fields: string[]; data: [number, string, string, string | null][] };
 
 export default function SearchPage({ onSelect }: { onSelect: (company: Company) => void }) {
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
@@ -43,14 +46,32 @@ export default function SearchPage({ onSelect }: { onSelect: (company: Company) 
   }, [companies, search]);
 
   return (
-    <main className="search-page">
-      <header>
-        <div className="wordmark">Stock search</div>
-        <h1>Find a company.</h1>
-        <p>Search by company name or stock ticker.</p>
-      </header>
-
-      <label className="search-label" htmlFor="company-search">Company or ticker</label>
+    <main className="home-page">
+      <header className="home-topbar">
+        <div className="home-account">
+          <a className="home-brand" href="#" aria-label="Fairfax Investing Group home"><img className="home-brand-logo" src={logo} alt="Fairfax Investing Group"/></a>
+          <form className="home-login-form" aria-labelledby="home-login-title" onSubmit={event => event.preventDefault()}>
+            <h2 id="home-login-title">Log in</h2>
+            <p>Use your email and password.</p>
+            <div className="home-login-fields">
+              <label className="sr-only" htmlFor="home-login-email">Email address</label>
+              <input id="home-login-email" type="email" name="email" autoComplete="username" placeholder="Email" required/>
+              <label className="sr-only" htmlFor="home-login-password">Password</label>
+              <input id="home-login-password" type="password" name="password" autoComplete="current-password" placeholder="Password" required/>
+            </div>
+            <div className="home-login-actions"><button type="submit" disabled aria-describedby="home-login-availability">Log in</button><small id="home-login-availability">Sign-in coming soon</small></div>
+          </form>
+        </div>
+        <section className="home-methodology" aria-label="Welcome and investment methodology">
+          <ol>
+            <li>Welcome to the Fairfax Investing Group Research Dashboard! This platform serves as a centralized hub for our investment research, where we identify, analyze, and monitor investment opportunities using a Growth at a Reasonable Price (GARP) methodology.</li>
+            <li>Our Investment Philosophy: Our approach draws inspiration from the Beardstown Ladies, an investment club founded in 1983. Their 1995 bestseller, <em>The Beardstown Ladies’ Common-Sense Investment Guide</em>, popularized individual stock research and investment clubs across the country.</li>
+            <li>Navigating the Dashboard: Use the toolbar on the right to access company research, evaluate financial metrics, review investment theses, and explore opportunities through our GARP framework.</li>
+          </ol>
+        </section>
+        <section className="home-company-search" aria-labelledby="company-search-title" onFocusCapture={() => setSearchOpen(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchOpen(false); }} onKeyDown={event => { if (event.key === 'Escape') setSearchOpen(false); }}>
+          <h2 id="company-search-title">Find a company</h2>
+          <label className="sr-only" htmlFor="company-search">Company name or stock ticker</label>
       <div className="search-field">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
         <input
@@ -58,15 +79,16 @@ export default function SearchPage({ onSelect }: { onSelect: (company: Company) 
           type="search"
           placeholder="e.g. Apple or AAPL"
           value={query}
-          onChange={event => setQuery(event.target.value)}
+          onChange={event => { setQuery(event.target.value); setSearchOpen(true); }}
           autoComplete="off"
           spellCheck={false}
           aria-controls="search-results"
+          aria-expanded={searchOpen}
         />
         {query && <button className="clear-button" onClick={() => setQuery('')} aria-label="Clear search">×</button>}
       </div>
 
-      <section id="search-results" aria-label="Search results" aria-busy={status === 'loading'}>
+      <section id="search-results" hidden={!searchOpen} aria-label="Search results" aria-busy={status === 'loading'}>
         <div role="status" aria-live="polite">
           {status === 'loading' && <p className="message">Loading company directory…</p>}
           {status === 'error' && <p className="message">Couldn’t load the company directory. <button className="text-button" onClick={() => setAttempt(value => value + 1)}>Try again</button></p>}
@@ -84,11 +106,14 @@ export default function SearchPage({ onSelect }: { onSelect: (company: Company) 
           </li>)}
         </ul>}
       </section>
+        </section>
+      </header>
 
-      <footer>
-        <a href="https://www.sec.gov/files/company_tickers_exchange.json" target="_blank" rel="noreferrer">SEC company directory ↗</a>
-        <span>Local snapshot · US market coverage · Click a company to create a study</span>
-      </footer>
+      <Suspense fallback={<p className="portfolio-loading" role="status">Loading research dashboard…</p>}><PortfolioDashboard onStudy={ticker => {
+        const company = companies.find(item => item.ticker === ticker);
+        if (company) onSelect(company);
+        else { setQuery(ticker); document.getElementById('company-search')?.focus(); }
+      }}/></Suspense>
     </main>
   );
 }

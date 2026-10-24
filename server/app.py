@@ -11,6 +11,7 @@ import threading
 from server.studies import ROOT, company_for, create_study, get_study
 from server.quotes import get_quote
 from server.news import get_news
+from server.portfolio import get_portfolio, start_portfolio_scheduler
 
 STUDY_SLOTS = threading.BoundedSemaphore(4)
 
@@ -35,6 +36,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == '/api/health':
             return self.json_response(200, {'status': 'ok'})
+        if path == '/api/portfolio':
+            return self.json_response(200, get_portfolio())
         news_match = re.fullmatch(r'/api/news/([A-Z0-9][A-Z0-9.\-]{0,14})', path)
         if news_match:
             try:
@@ -86,10 +89,12 @@ if __name__ == '__main__':
     port = int(os.environ.get('API_PORT', '8000'))
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     server.daemon_threads = True
+    portfolio_scheduler = start_portfolio_scheduler()
     print(f'Stock study API: http://127.0.0.1:{port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        portfolio_scheduler.set()
         server.server_close()

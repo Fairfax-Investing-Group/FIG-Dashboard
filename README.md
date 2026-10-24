@@ -72,3 +72,25 @@ npm start
 - `server/app.py`: HTTP API and static serving.
 - `server/studies.py`: source requests and snapshot persistence.
 - `server/financials.py`: SEC annual financial normalization.
+
+## Daily homepage portfolio updates
+
+The Python server runs a background portfolio updater automatically. It refreshes
+15 minutes after each NYSE session closes (normally 4:15 p.m. Eastern, 1:15 p.m.
+on early-close days), skips exchange holidays/weekends, and catches up on startup.
+Keep the server running for scheduled updates; an open browser is not required.
+The homepage checks the stored result every minute while visible.
+
+Workbook transactions and cash remain in `src/data/portfolio.json`. Yahoo Finance
+regular-session closing prices update holdings, partner pitch records, market
+pulse, indexes, 52-week ranges, returns, and history. Cost bases and purchase dates
+are preserved; share counts adjust for splits after the imported snapshot. Future
+returns assume no new purchases, sales, cash flows, or dividend reinvestment until
+the source transactions are changed. The benchmark continues the workbook's
+starting basis; existing workbook return history is retained before the import date.
+
+Completed updates are atomically persisted in `.data/portfolio.json` (override
+with `PORTFOLIO_CACHE`). All instruments must have the same completed session;
+failed/incomplete updates retain the previous snapshot and retry after five
+minutes. A changed source workbook invalidates the cache. To import a revised
+workbook, run `python3 scripts/importDashboard.py path/to/workbook.xlsx`.
