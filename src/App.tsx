@@ -1,27 +1,29 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
 const StudyPage = lazy(() => import('./StudyPage'));
-import type { Study, StudyDocument } from './types';
+import type { StudyDocument } from './types';
 import { studyView } from './studyDocument';
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
 
-async function readResponse(response: Response): Promise<Study> {
+async function readResponse(response: Response): Promise<StudyDocument> {
   if (!response.headers.get('content-type')?.includes('application/json')) {
     throw new Error('The study backend is unavailable. Start the app with npm run dev and try again.');
   }
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Could not load the study. Please try again.');
-  return studyView(data as StudyDocument);
+  if (data.SchemaVersion !== 1) throw new Error('Unsupported study data version. Restart the backend and refresh.');
+  return data as StudyDocument;
 }
 
 export default function App() {
   const [route, setRoute] = useState(readRoute);
-  const [study, setStudy] = useState<Study | null>(null);
+  const [studyDocument, setStudyDocument] = useState<StudyDocument | null>(null);
+  const study = useMemo(() => studyDocument?.SchemaVersion === 1 ? studyView(studyDocument) : null, [studyDocument, studyView]);
   const [pending, setPending] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const cache = useRef(new Map<string, Study>());
+  const cache = useRef(new Map<string, StudyDocument>());
   const request = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -37,18 +39,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!route) { setStudy(null); return; }
+    if (!route) { setStudyDocument(null); return; }
     const match = /^\/study\/([a-f0-9-]{36})$/.exec(route);
     if (!match) { setError('This study link is invalid. Return to search to create a study.'); return; }
     const cached = cache.current.get(match[1]);
-    if (cached) { setStudy(cached); setLoading(false); return; }
+    if (cached?.SchemaVersion === 1) { setStudyDocument(cached); setLoading(false); return; }
     const controller = new AbortController();
     request.current = controller;
     setLoading(true);
     setError(null);
     fetch(`/api/studies/${match[1]}`, { signal: controller.signal })
       .then(readResponse)
-      .then(data => { cache.current.set(data.id, data); setStudy(data); })
+      .then(data => { cache.current.set(data.Study.StudyID, data); setStudyDocument(data); })
       .catch(error => { if (error.name !== 'AbortError') setError(error.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -69,10 +71,10 @@ export default function App() {
         signal: controller.signal,
       }).then(readResponse);
       if (controller.signal.aborted) return;
-      cache.current.set(data.id, data);
-      setStudy(data);
+      cache.current.set(data.Study.StudyID, data);
+      setStudyDocument(data);
       setPending(null);
-      window.location.hash = `/study/${data.id}`;
+      window.location.hash = `/study/${data.Study.StudyID}`;
     } catch (error) {
       if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Could not create this study.');
     } finally {
@@ -85,7 +87,7 @@ export default function App() {
     setPending(null);
     setError(null);
     setLoading(false);
-    setStudy(null);
+    setStudyDocument(null);
     window.location.hash = '';
   }
 

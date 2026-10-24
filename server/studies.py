@@ -109,12 +109,12 @@ def fetch_financials(cik):
     url = f'https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json'
     payload = sec_json(url)
     normalized = normalize_financials(payload)
-    normalized['statements'] = extract_statements(payload, normalized['currency'], normalized['annual'])
     try:
         normalized['submissions'] = sec_json(f'https://data.sec.gov/submissions/CIK{cik:010d}.json')
     except Exception:
         normalized['submissions'] = {}
         normalized['warnings'].append('SEC company metadata could not be loaded; financial statements are preserved.')
+    normalized['statements'] = extract_statements(payload, normalized['currency'], normalized['annual'], submissions=normalized['submissions'])
     return {**normalized, 'url': url, 'retrievedAt': datetime.now(timezone.utc).isoformat()}
 
 

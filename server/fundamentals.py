@@ -59,7 +59,7 @@ def facts_for(payload, field, currency, today):
             if start and (end - start).days <= 0:
                 continue
             result.append({'start': start, 'end': end, 'filed': filed, 'value': value, 'priority': priority,
-                           'concept': f'{taxonomy}:{concept}', 'unit': unit, 'accession': fact.get('accn')})
+                           'concept': f'{taxonomy}:{concept}', 'unit': unit, 'accession': fact.get('accn'), 'form': fact.get('form')})
     return result
 
 
@@ -68,7 +68,7 @@ def select(candidates):
 
 
 def provenance(fact):
-    return {'Concept': fact['concept'], 'Filed': str(fact['filed']), 'Accession': fact['accession'], 'Unit': fact['unit'],
+    return {'Concept': fact['concept'], 'Filed': str(fact['filed']), 'Accession': fact['accession'], 'Form': fact['form'], 'Unit': fact['unit'],
             'Start': str(fact['start']) if fact['start'] else None, 'End': str(fact['end'])}
 
 
@@ -78,15 +78,32 @@ def fiscal_period(end, fiscal_month):
     return year, quarter
 
 
-def extract_statements(payload, currency, annual, today=None):
+def extract_statements(payload, currency, annual, today=None, submissions=None):
     today = today or date.today()
     if not currency:
         return {'annual': {}, 'quarterly': []}
     candidates = {field: facts_for(payload, field, currency, today) for field in (*DURATION, *INSTANT)}
+    recent = (submissions or {}).get('filings', {}).get('recent', {})
+    filings = {}
+    for form, report, filed, accession in zip(recent.get('form', []), recent.get('reportDate', []), recent.get('filingDate', []), recent.get('accessionNumber', [])):
+        try:
+            end, filing_date = date.fromisoformat(report), date.fromisoformat(filed)
+        except (ValueError, TypeError):
+            continue
+        if form not in FORMS or end > today or filing_date > today:
+            continue
+        if end not in filings or filings[end]['Filed'] < filed:
+            filings[end] = {'Form': form, 'Filed': filed, 'Accession': accession}
     cutoff = date(today.year - 10, 1, 1)
     # Quarter anchors must be actual roughly 90-day income periods, not YTD facts.
     ends = sorted({fact['end'] for field in ('Sales', 'EPS', 'PTP', 'NetIncome') for fact in candidates[field]
                    if fact['end'] >= cutoff and 70 <= (fact['end'] - fact['start']).days <= 110})
+    # A 10-Q may expose only cumulative facts. Include its report date so Q2/Q3
+    # are still extracted by differencing YTD values, even without a 90-day anchor.
+    last_annual = max((date.fromisoformat(row['periodEnd']) for row in annual), default=cutoff)
+    ends = sorted(set(ends) | {end for end, filing in filings.items() if end > last_annual and filing['Form'] in {'10-Q', '10-Q/A'}} |
+                  {fact['end'] for field in ('Sales', 'PTP', 'NetIncome') for fact in candidates[field]
+                   if fact['end'] > last_annual and fact['form'] in {'10-Q', '10-Q/A'} and 70 <= (fact['end'] - fact['start']).days <= 300})
     # Annual periods can also supply a Q4 anchor for additive statements.
     ends = sorted(set(ends) | {date.fromisoformat(row['periodEnd']) for row in annual})
     unique = []
@@ -119,7 +136,11 @@ def extract_statements(payload, currency, annual, today=None):
                 beginning = select([fact for fact in candidates[key] if 330 <= (end - fact['end']).days <= 380])
                 if beginning:
                     fields[f'{key}Begin'], sources[f'{key}Begin'] = beginning['value'], provenance(beginning)
-        return {'AsOfDataDate': str(end), 'FiscalYear': end.year if full_year else fiscal_period(end, fiscal_month)[0],
+        filing = filings.get(end)
+        if not filing:
+            primary = next((sources[key] for key in ('Sales', 'EPS', 'PTP', 'NetIncome') if key in sources), {})
+            filing = {key: primary[key] for key in ('Form', 'Filed', 'Accession') if key in primary}
+        return {**filing, 'AsOfDataDate': str(end), 'FiscalYear': end.year if full_year else fiscal_period(end, fiscal_month)[0],
                 **({} if full_year else {'QuarterNo': fiscal_period(end, fiscal_month)[1]}), 'Values': fields, 'Sources': sources}
 
     return {'annual': {row['periodEnd']: statement(date.fromisoformat(row['periodEnd']), True) for row in annual},

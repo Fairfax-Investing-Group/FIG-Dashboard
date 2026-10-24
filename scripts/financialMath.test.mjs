@@ -70,3 +70,32 @@ test('five-year averages use the latest five years without substituting earlier 
   assert.equal(fiveYearAverage([]), null);
   assert.equal(fiveYearAverage([NaN, Infinity]), null);
 });
+
+test('excluding an outlier year recalculates growth without compressing elapsed years', () => {
+  const input = points([100, 500, 121, 133.1]);
+  assert.ok(Math.abs(annualGrowth(input) - 10) > 1);
+  assert.ok(Math.abs(annualGrowth(input, [2017]) - 10) < 1e-10);
+  const fit = logLinearRegression(input, [2017]);
+  assert.deepEqual(fit.fitted.map(point => point.periodEnd), ['2016-12-31', '2018-12-31', '2019-12-31']);
+  assert.equal(input[1].value, 500);
+  assert.equal(annualGrowth(input, []), annualGrowth(input));
+});
+
+test('excluded losses and endpoint years do not contribute to growth', () => {
+  const input = points([100, -5, 121, 133.1]);
+  assert.equal(annualGrowth(input), null);
+  assert.ok(Math.abs(annualGrowth(input, [2017]) - 10) < 1e-10);
+  assert.ok(Math.abs(annualGrowth(input, [2016, 2017]) - 10) < 1e-10);
+  assert.equal(annualGrowth(input, [2016, 2017, 2018]), null);
+  assert.equal(logLinearRegression(input, [2016, 2017, 2018, 2019]), null);
+});
+
+test('a fit can span the full history while excluded endpoint years do not affect its slope', () => {
+  const input = points([500, 110, 121, 900]);
+  const dates = input.map(point => point.periodEnd);
+  const model = logLinearRegression(input, [2016, 2019], dates);
+  assert.ok(Math.abs(model.growthRate - 10) < 1e-10);
+  assert.deepEqual(model.fitted.map(point => point.periodEnd), dates);
+  assert.ok(Math.abs(model.fitted[0].value - 100) < 1e-10);
+  assert.ok(Math.abs(model.fitted.at(-1).value - 133.1) < 1e-10);
+});

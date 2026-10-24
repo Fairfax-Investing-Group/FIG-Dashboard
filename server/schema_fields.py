@@ -8,7 +8,8 @@ STUDY_FIELDS = ('StudyID', 'IssueId', 'DailyDateId', 'DailyDateIdFormatted', 'Da
  'Zoning', 'EstimatedTaxRate', 'DateCreated', 'ModifiedBy', 'DateModified', 'LowEPSUpdateMethod',
  'DateJudgmentsModified', 'NewsletterCode')
 
-COMPANY_FIELDS = ('Ticker', 'DailyCompanyId', 'DailyDateId', 'IssueId', 'CompanyName', 'WebURL', 'Size',
+COMPANY_FIELDS = ('MarketCap', 'EnterpriseValue', 'SharesOutstanding', 'AverageVolume',
+ 'Ticker', 'DailyCompanyId', 'DailyDateId', 'IssueId', 'CompanyName', 'WebURL', 'Size',
  'SectorCode', 'SectorDesc', 'IndustryCode', 'IndustryDesc', 'GroupType', 'Description',
  'ExchangeType', 'DatasourceType', 'BasicShares', 'Dividend', 'ClosingPrice', 'DateOfClosingPrice',
  'AnalystEPSEstGrowthRate', 'AnalystEPSEstGrowthAmt', 'FiscalYearLast', 'FYMonth', 'TotalDebt',

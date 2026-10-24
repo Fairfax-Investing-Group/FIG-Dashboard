@@ -70,3 +70,49 @@ test('management ratios convert decimal fractions once and preserve missing fiel
   assert.equal(missing.returnOnEquity, null);
   assert.equal(missing.debtToCapital, null);
 });
+
+test('book value and free cash flow per share keep per-share units and missing observations', () => {
+  const input = document();
+  Object.assign(input.AnnualData[0], { BookValue: 18.8197, CashFlow: 2.9746 });
+  const row = studyView(input).annual[0];
+  assert.equal(row.bookValuePerShare, 18.8197);
+  assert.equal(row.freeCashFlowPerShare, 2.9746);
+  Object.assign(input.AnnualData[0], { BookValue: 0, CashFlow: -1.25 });
+  const losses = studyView(input).annual[0];
+  assert.equal(losses.bookValuePerShare, 0);
+  assert.equal(losses.freeCashFlowPerShare, -1.25);
+  delete input.AnnualData[0].BookValue;
+  input.AnnualData[0].CashFlow = null;
+  const missing = studyView(input).annual[0];
+  assert.equal(missing.bookValuePerShare, null);
+  assert.equal(missing.freeCashFlowPerShare, null);
+});
+
+test('quarterly observations retain fiscal periods and convert totals without scaling per-share values', () => {
+  const input = document();
+  input.QuarterlyData = [{ ...input.AnnualData[0], FiscalYear: 2026, QuarterNo: 1, AsOfDataDate: '2025-09-30', Sales: 120, EPS: 0.75, PTP: 24, BookValue: 5.5, CashFlow: 0.8, FreeCashFlow: 8, SharesOut: 10,
+    Sources: { ...input.AnnualData[0].Sources, SharesOut: { Start: '2025-07-01', End: '2025-09-30' } } }];
+  const quarter = studyView(input).quarterly[0];
+  assert.equal(quarter.fiscalYear, 2026);
+  assert.equal(quarter.quarter, 1);
+  assert.equal(quarter.sales, 120e6);
+  assert.equal(quarter.pretaxProfit, 24e6);
+  assert.equal(quarter.eps, 0.75);
+  assert.equal(quarter.bookValuePerShare, 5.5);
+  assert.equal(quarter.freeCashFlowPerShare, 0.8);
+  assert.equal(quarter.freeCashFlow, 8e6);
+  assert.equal(quarter.dilutedShares, 10e6);
+  assert.equal(quarter.shareDays, 92);
+  assert.deepEqual(studyView(document()).quarterly, []);
+});
+
+test('historical valuation prices, ratios and dividends keep their per-share units', () => {
+  const input = document();
+  Object.assign(input.AnnualData[0], { HighPrice: 100, LowPrice: 70, HighPE: 50, LowPE: 35, Dividend: 0.5 });
+  const row = studyView(input).annual[0];
+  assert.equal(row.highPrice, 100);
+  assert.equal(row.lowPrice, 70);
+  assert.equal(row.highPE, 50);
+  assert.equal(row.lowPE, 35);
+  assert.equal(row.dividendPerShare, 0.5);
+});

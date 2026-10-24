@@ -54,6 +54,12 @@ def statement_fallbacks(stock, profile):
                             if value is not None:
                                 row['Values'][target] = -value if category == 'cashflow' and target == 'CapitalExpenditures' else value
                                 row['Sources'][target] = {'Provider': 'Yahoo Finance', 'Field': key, 'End': end, 'Unit': currency, 'Duration': 'annual' if name == 'annual' else 'instant' if category == 'balance' else 'standalone-quarter'}
+                    # Keep per-share inputs separate until split-history verification.
+                    share_fields = {'EndShares': 'OrdinarySharesNumber'} if category == 'balance' else {'EPS': 'DilutedEPS', 'SharesOut': 'DilutedAverageShares'} if category == 'income' else {}
+                    for target, key in share_fields.items():
+                        if key in frame.index and finite(frame.at[key, column]) is not None:
+                            row.setdefault('PerShareCandidates', {})[target] = finite(frame.at[key, column])
+                            row.setdefault('PerShareSources', {})[target] = {'Provider': 'Yahoo Finance', 'Field': key, 'End': end, 'Unit': f'{currency}/shares' if target == 'EPS' else 'shares'}
             except Exception:
                 failures.append(f'{name} {category} statement fallback')
     return result, failures

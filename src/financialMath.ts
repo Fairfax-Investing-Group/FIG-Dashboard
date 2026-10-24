@@ -1,7 +1,7 @@
 type GrowthPoint = { periodEnd: string; value: number | null };
 
-export function logLinearRegression(points: GrowthPoint[]): { growthRate: number; fitted: { periodEnd: string; value: number }[] } | null {
-  const available = points.filter(point => point.value !== null);
+export function logLinearRegression(points: GrowthPoint[], excludedYears: number[] = [], fitDates?: string[]): { growthRate: number; fitted: { periodEnd: string; value: number }[] } | null {
+  const available = points.filter(point => point.value !== null && !excludedYears.includes(new Date(point.periodEnd).getUTCFullYear()));
   if (available.length < 2 || available.some(point => !Number.isFinite(point.value) || point.value! <= 0)) return null;
   // Fiscal year coordinates preserve missing-year gaps and match annual studies.
   const years = available.map(point => new Date(point.periodEnd).getUTCFullYear());
@@ -15,13 +15,13 @@ export function logLinearRegression(points: GrowthPoint[]): { growthRate: number
   const result = Math.expm1(covariance / variance) * 100;
   if (!Number.isFinite(result)) return null;
   const slope = covariance / variance;
-  const fitted = available.map((point, index) => ({ periodEnd: point.periodEnd, value: Math.exp(meanLog + slope * (years[index] - meanYear)) })).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+  const fitted = (fitDates ?? available.map(point => point.periodEnd)).map(periodEnd => ({ periodEnd, value: Math.exp(meanLog + slope * (new Date(periodEnd).getUTCFullYear() - meanYear)) })).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
   if (fitted.some(point => !Number.isFinite(point.value) || point.value <= 0)) return null;
   return { growthRate: result, fitted };
 }
 
-export function annualGrowth(points: GrowthPoint[]): number | null {
-  return logLinearRegression(points)?.growthRate ?? null;
+export function annualGrowth(points: GrowthPoint[], excludedYears: number[] = []): number | null {
+  return logLinearRegression(points, excludedYears)?.growthRate ?? null;
 }
 
 export function fiveYearEstimate(latest: number | null, forecast: string): number | null {

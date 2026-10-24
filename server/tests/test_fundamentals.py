@@ -31,6 +31,58 @@ def statement(values, sources=None):
 
 
 class FundamentalsTests(unittest.TestCase):
+    def test_missing_interim_periods_are_added_without_overwriting_sec_values(self):
+        end = '2026-04-30'
+        supplemental = {'Values': {'Sales': 30e6, 'PTP': 6e6, 'OperatingCashFlow': 5e6, 'CapitalExpenditures': 1e6, 'CommonStockEquity': 60e6},
+                        'Sources': {key: {'Provider': 'Yahoo Finance', 'Field': key, 'End': end} for key in ('Sales', 'PTP', 'OperatingCashFlow', 'CapitalExpenditures', 'CommonStockEquity')},
+                        'PerShareCandidates': {'EPS': 0.6, 'SharesOut': 10e6, 'EndShares': 10e6},
+                        'PerShareSources': {key: {'Provider': 'Yahoo Finance', 'Field': key, 'End': end} for key in ('EPS', 'SharesOut', 'EndShares')}}
+        raw = {'id': 'test', 'company': {}, 'annual': [{'periodEnd': '2026-01-31', 'sales': 100e6}], 'warnings': [],
+               'financialCurrency': 'USD', 'priceCurrency': 'USD',
+               'epsAdjustment': {'status': 'normalized', 'historyStart': '2016-01-01', 'asOf': '2026-10-23', 'events': []},
+               'statements': {'quarterly': [{'AsOfDataDate': '2025-07-31', 'FiscalYear': 2026, 'QuarterNo': 2, 'Form': '6-K', 'Values': {'Sales': 20e6}, 'Sources': {}}]},
+               'market': {'profile': {'financialCurrency': 'USD'}, 'statementFallbacks': {'quarterly': {
+                   '2025-07-31': {'Values': {'Sales': 999e6}, 'Sources': {'Sales': {'Provider': 'Yahoo Finance'}}}, end: supplemental}}}}
+        rows = normalize_study(raw)['QuarterlyData']
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['Sales'], 20)
+        self.assertEqual((rows[1]['FiscalYear'], rows[1]['QuarterNo']), (2027, 1))
+        self.assertEqual(rows[1]['Sales'], 30)
+        self.assertEqual(rows[1]['EPS'], 0.6)
+        self.assertEqual(rows[1]['EPSSplitFactor'], 1)
+        self.assertEqual(rows[1]['BookValue'], 6)
+        self.assertEqual(rows[1]['CashFlow'], 0.4)
+        self.assertEqual(rows[1]['Sources']['SharesOut']['Start'], '2026-02-01')
+        raw['epsAdjustment']['events'] = [{'date': '2026-08-01', 'ratio': 2}]
+        row = normalize_study(raw)['QuarterlyData'][-1]
+        self.assertEqual(row['Sales'], 30)
+        self.assertIsNone(row['EPS'])
+        self.assertIsNone(row['CashFlow'])
+        raw['market']['profile']['financialCurrency'] = 'EUR'
+        self.assertEqual(len(normalize_study(raw)['QuarterlyData']), 1)
+
+    def test_all_10qs_after_the_latest_10k_include_ytd_only_quarters(self):
+        data = payload()
+        put(data, 'Revenues', [fact(100, start='2023-01-01'),
+            fact(20, '2024-03-31', '2024-01-01', filed='2024-05-01', form='10-Q'),
+            fact(50, '2024-06-30', '2024-01-01', filed='2024-08-01', form='10-Q'),
+            fact(90, '2024-09-30', '2024-01-01', filed='2024-11-01', form='10-Q')])
+        submissions = {'filings': {'recent': {
+            'form': ['10-Q', '10-Q', '10-Q', '10-K'],
+            'reportDate': ['2024-09-30', '2024-06-30', '2024-03-31', '2023-12-31'],
+            'filingDate': ['2024-11-01', '2024-08-01', '2024-05-01', '2024-02-01'],
+            'accessionNumber': ['q3', 'q2', 'q1', 'annual'],
+        }}}
+        result = extract_statements(data, 'USD', [{'periodEnd': '2023-12-31'}], date(2024, 11, 5), submissions=submissions)
+        quarters = [row for row in result['quarterly'] if row['AsOfDataDate'] > '2023-12-31']
+        self.assertEqual([row['QuarterNo'] for row in quarters], [1, 2, 3])
+        self.assertEqual([row['Values']['Sales'] for row in quarters], [20, 30, 40])
+        self.assertEqual([row['Form'] for row in quarters], ['10-Q'] * 3)
+        self.assertEqual([row['Accession'] for row in quarters], ['q1', 'q2', 'q3'])
+        self.assertEqual(statement_record(quarters[-1], [], 'USD', 'USD')['Form'], '10-Q')
+        without_submissions = extract_statements(data, 'USD', [{'periodEnd': '2023-12-31'}], date(2024, 11, 5))
+        self.assertEqual([row['Values']['Sales'] for row in without_submissions['quarterly'] if row['AsOfDataDate'] > '2023-12-31'], [20, 30, 40])
+
     def test_annual_and_standalone_quarters_stay_separate(self):
         data = payload()
         put(data, 'Revenues', [fact(100, start='2023-01-01'), fact(20, '2023-03-31', '2023-01-01', form='10-Q'), fact(50, '2023-06-30', '2023-01-01', form='10-Q')])
@@ -177,6 +229,20 @@ class ExpandedIntegrationTests(unittest.TestCase):
         self.assertEqual(result['Company']['TotalDebt'], 12)
         self.assertEqual(result['Company']['TotalDebtQuarterLast'], 12)
         self.assertEqual(result['Metadata']['Units']['OwnershipPercentages'], 'percentage-points')
+
+    def test_header_statistics_use_millions_and_preserve_unavailable_values(self):
+        raw = {'id': 'test', 'company': {}, 'annual': [], 'warnings': [],
+               'market': {'profile': {'marketCap': 7.9e9, 'enterpriseValue': 8.4e9,
+                                      'sharesOutstanding': 84.2e6, 'averageVolume': 1.1e6}}}
+        company = normalize_study(raw)['Company']
+        self.assertEqual(company['MarketCap'], 7900)
+        self.assertEqual(company['EnterpriseValue'], 8400)
+        self.assertEqual(company['SharesOutstanding'], 84.2)
+        self.assertEqual(company['AverageVolume'], 1.1)
+        raw['market']['profile'] = {'marketCap': float('nan')}
+        company = normalize_study(raw)['Company']
+        for field in ('MarketCap', 'EnterpriseValue', 'SharesOutstanding', 'AverageVolume'):
+            self.assertIsNone(company[field])
 
     def test_cross_currency_statement_fallbacks_and_analysts_are_omitted(self):
         raw = {'id': 'test', 'company': {'ticker': 'TEST', 'cik': 1}, 'annual': [{'periodEnd': '2023-12-31', 'sales': 100e6}],

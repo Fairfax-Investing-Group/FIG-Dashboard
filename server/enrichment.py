@@ -1,5 +1,5 @@
 """Map additional SEC/Yahoo observations into the study contract."""
-from datetime import date
+from datetime import date, timedelta
 import math
 
 from server.study_schema import finite, growth_rate
@@ -64,6 +64,7 @@ def statement_record(statement, history, price_currency, financial_currency):
             derived(field, divide(values.get(price), values.get('EPS')) if (values.get('EPS') or 0) > 0 else None, [price, 'EPS'], f'{price} / split-normalized EPS')
     record = dict.fromkeys(ANNUAL_FIELDS)
     record.update({'FiscalYear': statement['FiscalYear'], 'AsOfDataDate': end, 'Sources': sources})
+    record.update({key: statement[key] for key in ('Form', 'Filed', 'Accession') if key in statement})
     if 'QuarterNo' in statement:
         record['QuarterNo'] = statement['QuarterNo']
     for key in ANNUAL_FIELDS:
@@ -85,6 +86,11 @@ PROFILE_FIELDS = {
 
 def enrich_company(document, profile, annual, quarterly):
     company = document['Company']
+    # Company totals are stored in millions, including share and volume counts.
+    for field, key in [('MarketCap', 'marketCap'), ('EnterpriseValue', 'enterpriseValue'),
+                       ('SharesOutstanding', 'sharesOutstanding'), ('AverageVolume', 'averageVolume')]:
+        value = finite(profile.get(key))
+        company[field] = value / 1e6 if value is not None else None
     for field, key in PROFILE_FIELDS.items():
         value = profile.get(key)
         if isinstance(value, str):
@@ -145,6 +151,10 @@ def apply_enrichment(document, data):
     currency, price_currency = document['Metadata']['FinancialCurrency'], document['Metadata']['PriceCurrency']
     rich = data.get('statements') or {}
     market = data.get('market') or {}
+    fallback_periods = market.get('statementFallbacks', {})
+    period_ends = sorted(set(fallback_periods.get('quarterly', {})) | {row['AsOfDataDate'] for row in document['AnnualData']} |
+                         {row['AsOfDataDate'] for row in rich.get('quarterly', [])})
+    adjustment = data.get('epsAdjustment') or {}
     def with_fallback(statement, frequency):
         supplemental = market.get('statementFallbacks', {}).get(frequency, {}).get(statement['AsOfDataDate'], {})
         values, sources = dict(statement['Values']), dict(statement['Sources'])
@@ -153,6 +163,25 @@ def apply_enrichment(document, data):
                 if values.get(key) is None:
                     values[key] = value
                     sources[key] = supplemental['Sources'][key]
+            end = statement['AsOfDataDate']
+            # Yahoo statement per-share bases are ambiguous across splits. Use
+            # them only when complete split history proves no intervening split.
+            verified = (adjustment.get('status') == 'normalized' and adjustment.get('historyStart') and adjustment.get('asOf') and
+                        adjustment['historyStart'] <= end <= adjustment['asOf'] and
+                        not any(end < event['date'] <= adjustment['asOf'] for event in adjustment.get('events', [])))
+            if verified:
+                preceding = [value for value in period_ends if 70 <= (date.fromisoformat(end) - date.fromisoformat(value)).days <= 110]
+                start = str(date.fromisoformat(preceding[-1]) + timedelta(days=1)) if preceding else None
+                if frequency == 'annual':
+                    start = (sources.get('Sales') or sources.get('PTP') or {}).get('Start')
+                    if not start:
+                        prior_year = [value for value in period_ends if 330 <= (date.fromisoformat(end) - date.fromisoformat(value)).days <= 380]
+                        start = str(date.fromisoformat(prior_year[-1]) + timedelta(days=1)) if prior_year else None
+                for key, value in supplemental.get('PerShareCandidates', {}).items():
+                    if values.get(key) is None and finite(value) is not None:
+                        values[key] = value
+                        sources[key] = {**supplemental['PerShareSources'][key], 'Start': start if key != 'EndShares' else None,
+                                        'SplitFactor': 1, 'SplitAsOf': adjustment['asOf'], 'Verification': 'No splits since reporting period end'}
         return {**statement, 'Values': values, 'Sources': sources}
     annual_by_date = {row['AsOfDataDate']: row for row in document['AnnualData']}
     for end, statement in rich.get('annual', {}).items():
@@ -168,7 +197,18 @@ def apply_enrichment(document, data):
                 record[key] = original.get(key)
         record['Sources'].update({key: original['Sources'][key] for key in ('Sales', 'EPS', 'PTP') if original['Sources'].get(key) is not None})
         original.update(record)
-    quarter_statements = [with_fallback(statement, 'quarterly') for statement in rich.get('quarterly', [])]
+    quarter_statements = list(rich.get('quarterly', []))
+    if document['AnnualData'] and market.get('profile', {}).get('financialCurrency') == currency:
+        from server.fundamentals import fiscal_period
+        fiscal_month = int(document['AnnualData'][-1]['AsOfDataDate'][5:7])
+        for end, supplemental in sorted(fallback_periods.get('quarterly', {}).items()):
+            if date.fromisoformat(end) > date.today() or any(abs((date.fromisoformat(row['AsOfDataDate']) - date.fromisoformat(end)).days) <= 7 for row in quarter_statements):
+                continue
+            if not supplemental.get('Values') and not supplemental.get('PerShareCandidates'):
+                continue
+            year, quarter = fiscal_period(date.fromisoformat(end), fiscal_month)
+            quarter_statements.append({'AsOfDataDate': end, 'FiscalYear': year, 'QuarterNo': quarter, 'Values': {}, 'Sources': {}})
+    quarter_statements = [with_fallback(statement, 'quarterly') for statement in sorted(quarter_statements, key=lambda row: row['AsOfDataDate'])]
     quarterly = [statement_record(statement, history, price_currency, currency) for statement in quarter_statements]
     # Retain helper balance metrics needed for current-company snapshots.
     for row, statement in zip(quarterly, quarter_statements):

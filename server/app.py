@@ -9,6 +9,7 @@ import re
 import threading
 
 from server.studies import ROOT, company_for, create_study, get_study
+from server.quotes import get_quote
 
 STUDY_SLOTS = threading.BoundedSemaphore(4)
 
@@ -33,6 +34,12 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == '/api/health':
             return self.json_response(200, {'status': 'ok'})
+        quote_match = re.fullmatch(r'/api/quotes/([A-Z0-9][A-Z0-9.\-]{0,14})', path)
+        if quote_match:
+            try:
+                return self.json_response(200, get_quote(quote_match.group(1)))
+            except Exception:
+                return self.json_response(503, {'error': 'The latest market quote is temporarily unavailable.'})
         match = re.fullmatch(r'/api/studies/([a-f0-9-]{36})', path)
         if match:
             study = get_study(match.group(1))
