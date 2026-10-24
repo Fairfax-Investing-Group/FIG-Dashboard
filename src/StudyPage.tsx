@@ -292,7 +292,7 @@ function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYea
     </div>)}<div className="sidebar-chart-controls">{study.priceInterval === '1wk' && <p className="legend-control-key">Price: weekly closes</p>}<p className="legend-control-key">HA/SA: Hide/Show Actual · HF/SF: Hide/Show Fit</p><div><button onClick={() => { setOffsets({}); setHidden([]); onResetExclusions(); }}>Reset chart</button>{excludedYears.length > 0 && <button onClick={onRestoreYears}>Restore years</button>}</div></div></aside>
     <div className="chart-main">
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 4, right: 8, bottom: 0, left: 0 }} accessibilityLayer>
-      <CartesianGrid vertical horizontal={false} stroke="#e8edf0" syncWithTicks/>
+      <CartesianGrid vertical horizontal stroke="#edf1f5" syncWithTicks/>
       <XAxis dataKey="timestamp" type="number" scale="time" domain={[Date.UTC(firstYear, 0, 1), Date.UTC(lastYear, 11, 31)]} padding={{ left: 18, right: 0 }} ticks={yearTicks} tick={<YearTick excludedYears={excludedYears} onToggle={onToggleYear}/>} tickLine={false} axisLine={false} tickMargin={4} interval={0} height={22}/>
       <YAxis domain={domain} type="number" scale="linear" width={8} ticks={[]} tick={false} axisLine={{ stroke: '#e1e7e4' }} tickLine={false} allowDataOverflow/>
       <SeriesBaselines labels={baselines}/>
