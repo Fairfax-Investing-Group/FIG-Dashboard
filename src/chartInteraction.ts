@@ -47,3 +47,16 @@ export function nearestChartLine<T extends string>(lines: { id: T; points: (Pixe
   }
   return nearest;
 }
+
+/** Keep existing labels in place first, then place a moving label in the nearest free slot. */
+export function stackChartLabels<T extends string>(labels: { id: T; y: number }[], top: number, bottom: number, gap = 18, moving?: T): { id: T; y: number }[] {
+  const ordered = [...labels.filter(label => label.id !== moving), ...labels.filter(label => label.id === moving)];
+  const placed: { id: T; y: number }[] = [];
+  for (const label of ordered) {
+    const candidates = [Math.max(top, Math.min(bottom, label.y)), top, bottom, ...placed.flatMap(other => [other.y - gap, other.y + gap])]
+      .filter(y => y >= top && y <= bottom && placed.every(other => Math.abs(y - other.y) >= gap - 0.01))
+      .sort((a, b) => Math.abs(a - label.y) - Math.abs(b - label.y) || a - b);
+    placed.push({ id: label.id, y: candidates[0] ?? label.y });
+  }
+  return placed;
+}

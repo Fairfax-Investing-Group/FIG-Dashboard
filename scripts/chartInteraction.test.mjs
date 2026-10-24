@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = readFileSync(new URL('../src/chartInteraction.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
-const { nearestObservation, nearestChartLine, interpolatedObservation } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { nearestObservation, nearestChartLine, interpolatedObservation, stackChartLabels } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const observations = [{ timestamp: 0, value: 100 }, { timestamp: 100, value: 400 }];
 
 test('individual actual-line inspection reports an actual observation and its original date', () => {
@@ -68,4 +68,21 @@ test('the nearest actual line wins among multiple actual series', () => {
     { id: 'eps:fit', priority: 0, points: [{ x: 0, y: 18 }, { x: 100, y: 18 }] },
   ];
   assert.equal(nearestChartLine(lines, { x: 50, y: 18 }), 'eps:actual');
+});
+
+
+test('moving labels snap around an existing label without moving its anchor', () => {
+  assert.deepEqual(stackChartLabels([{ id: 'sales', y: 100 }, { id: 'eps', y: 103 }], 0, 200, 18, 'eps'), [{ id: 'sales', y: 100 }, { id: 'eps', y: 118 }]);
+  assert.deepEqual(stackChartLabels([{ id: 'sales', y: 100 }, { id: 'eps', y: 97 }], 0, 200, 18, 'eps'), [{ id: 'sales', y: 100 }, { id: 'eps', y: 82 }]);
+});
+
+test('coincident labels remain distinct and stay inside the chart', () => {
+  for (const y of [8, 100, 192]) {
+    const positions = stackChartLabels(['sales', 'eps', 'ptp', 'price'].map(id => ({ id, y })), 8, 192);
+    assert.equal(positions.length, 4);
+    for (const [index, label] of positions.entries()) {
+      assert.ok(label.y >= 8 && label.y <= 192);
+      for (const other of positions.slice(index + 1)) assert.ok(Math.abs(label.y - other.y) >= 18);
+    }
+  }
 });

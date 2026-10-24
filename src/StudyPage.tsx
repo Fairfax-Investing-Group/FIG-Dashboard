@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
 import type { AnnualRow, FactSource, Metric, Study } from './types';
 import { annualGrowth, fiveYearEstimate, logLinearRegression } from './financialMath';
-import { nearestChartLine, nearestObservation, interpolatedObservation } from './chartInteraction';
+import { nearestChartLine, nearestObservation, interpolatedObservation, stackChartLabels } from './chartInteraction';
 
 const metrics: { key: Metric; title: string; color: string; note: string }[] = [
   { key: 'sales', title: 'Sales', color: '#2563eb', note: 'Annual revenue' },
@@ -47,10 +47,20 @@ type HoverLine = {
 type HoveredObservation = { id: ChartLineId; timestamp: number; clientX: number; clientY: number };
 type PointerPosition = { svg: SVGSVGElement; clientX: number; clientY: number };
 
-function SeriesGridLine({ x1, x2, y1, y2, labels }: { x1?: number | string; x2?: number | string; y1?: number | string; y2?: number | string; labels: { key: ChartKey; value: number }[] }) {
-  const yScale = useYAxisScale();
-  const label = labels.find(label => Math.abs((yScale?.(label.value) ?? NaN) - Number(y1)) < 0.1);
-  return <line className={label ? `draggable-series-${label.key}` : undefined} x1={x1} x2={x2} y1={y1} y2={y2} stroke="#e8edf0"/>;
+type AxisLabel = { key: ChartKey; value: number; name: string; color: string };
+function SeriesAxisLabels({ labels, order }: { labels: AxisLabel[]; order: ChartKey[] }) {
+  const area = usePlotArea(), yScale = useYAxisScale();
+  if (!area || !yScale) return null;
+  const anchors = [...labels].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)).map(label => ({ id: label.key, y: yScale(label.value)! }));
+  const positions = stackChartLabels(anchors, area.y + 8, area.y + area.height - 8);
+  return <ZIndexLayer zIndex={2000}><g pointerEvents="none">{anchors.map(anchor => {
+    const label = labels.find(label => label.key === anchor.id)!;
+    const y = positions.find(position => position.id === anchor.id)!.y;
+    return <g key={label.key}>
+      <g className={`draggable-series-${label.key}`}><line x1={area.x} x2={area.x + area.width} y1={anchor.y} y2={anchor.y} stroke="#e8edf0"/><line x1={area.x - 6} x2={area.x} y1={anchor.y} y2={anchor.y} stroke="#d3ddd6"/></g>
+      <g data-axis-label={label.key} data-label-anchor={anchor.y} data-label-y={y}><text x={area.x - 13} y={y} dy={4} textAnchor="end" fill={label.color} fontSize={10} fontWeight={500}>{label.name}</text></g>
+    </g>;
+  })}</g></ZIndexLayer>;
 }
 
 function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: ChartKey, delta: number) => void }) {
@@ -59,7 +69,7 @@ function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: C
   const [hovered, setHovered] = useState<HoveredObservation | null>(null);
   const frame = useRef<number | null>(null);
   const pendingPointer = useRef<PointerPosition | null>(null);
-  const drag = useRef<{ key: ChartKey; startY: number; delta: number; min: number; max: number; elements: SVGElement[] } | null>(null);
+  const drag = useRef<{ key: ChartKey; startY: number; delta: number; min: number; max: number; elements: SVGElement[]; labels: SVGGElement[] } | null>(null);
   const [dragging, setDragging] = useState(false);
   // Pixel geometry and formatters remain cached while only the hover overlay moves.
   const targets = useMemo(() => lines.map(line => ({ ...line,
@@ -75,7 +85,7 @@ function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: C
   // Drag previews move SVG groups without recalculating chart data each frame.
   useLayoutEffect(() => {
     if (!drag.current) return;
-    for (const element of drag.current.elements) element.style.transform = '';
+    for (const element of [...drag.current.elements, ...drag.current.labels]) element.style.transform = '';
     drag.current = null;
   }, [lines]);
 
@@ -116,6 +126,13 @@ function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: C
     const scale = (pointer.svg.viewBox.baseVal.height || bounds.height) / bounds.height;
     current.delta = Math.max(current.min, Math.min(current.max, (pointer.clientY - current.startY) * scale));
     for (const element of current.elements) element.style.transform = `translateY(${current.delta}px)`;
+    if (area) {
+      const positions = stackChartLabels(current.labels.map(element => ({ id: element.dataset.axisLabel!, y: Number(element.dataset.labelAnchor) + (element.dataset.axisLabel === current.key ? current.delta : 0) })), area.y + 8, area.y + area.height - 8, 18, current.key);
+      for (const element of current.labels) {
+        const position = positions.find(position => position.id === element.dataset.axisLabel)!;
+        element.style.transform = `translateY(${position.y - Number(element.dataset.labelY)}px)`;
+      }
+    }
   }
   function startDrag(event: React.PointerEvent<SVGRectElement>) {
     if (event.button !== 0 || !area) return;
@@ -128,7 +145,7 @@ function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: C
     drag.current = { key, startY: pointer.clientY, delta: 0, min: Math.min(0, area.y - Math.min(...ys)), max: Math.max(0, area.y + area.height - Math.max(...ys)), elements: [...new Set([...pointer.svg.querySelectorAll<SVGElement>(`.draggable-series-${key}`)].map(element =>
       // Recharts portals dots separately from curves. Move the whole dots and
       // axis-tick groups, including the label and its tick mark.
-      element.closest<SVGElement>('.recharts-line-dots, .recharts-cartesian-axis-tick') ?? element))] };
+      element.closest<SVGElement>('.recharts-line-dots, .recharts-cartesian-axis-tick') ?? element))], labels: [...pointer.svg.querySelectorAll<SVGGElement>('[data-axis-label]')] };
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragging(true);
   }
@@ -143,7 +160,7 @@ function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: C
       const unitHeight = yScale(0)! - yScale(1)!;
       onMove(current.key, -current.delta / unitHeight);
     } else {
-      for (const element of current.elements) element.style.transform = '';
+      for (const element of [...current.elements, ...current.labels]) element.style.transform = '';
       drag.current = null;
     }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -173,6 +190,7 @@ function LineHoverLayer({ lines, onMove }: { lines: HoverLine[]; onMove: (key: C
 }
 
 function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) {
+  const [labelOrder, setLabelOrder] = useState<ChartKey[]>([]);
   const [offsets, setOffsets] = useState<Partial<Record<ChartKey, number>>>({});
   const [hidden, setHidden] = useState<ChartLineId[]>([]);
   const [selected, setSelected] = useState<ChartLineId | null>(null);
@@ -272,20 +290,18 @@ function OverlayChart({ annual, study }: { annual: AnnualRow[]; study: Study }) 
       <label>Inspect line <select aria-label="Inspect a chart line" value={selectedLine?.id ?? ''} onChange={event => inspectLine(event.target.value ? event.target.value as ChartLineId : null)}><option value="">All visible lines</option>{lines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select></label>
       <button disabled={!selectedLine} onClick={() => { if (selectedLine) setHidden(lines.filter(line => line.id !== selectedLine.id).map(line => line.id)); }}>Show only this line</button>
       <button onClick={() => { setHidden([]); setSelected(null); }}>Show all</button>
-      <button onClick={() => { setOffsets({}); setHidden([]); setSelected(null); }}>Reset chart</button>
+      <button onClick={() => { setOffsets({}); setLabelOrder([]); setHidden([]); setSelected(null); }}>Reset chart</button>
     </div>
     <div className="line-inspector-status" role="status">{selectedLine ? <><i style={{ background: selectedLine.color }}/><strong>{selectedLine.name}</strong><span>{chartDate(selectedLine.observations[0].timestamp)} – {chartDate(selectedLine.observations.at(-1)!.timestamp)} · Hover for yearly actuals or smooth fitted values</span></> : 'Drag a line vertically to reposition it. Hover for its value; regression hovers follow the cursor smoothly. Toggle Actual and Regression independently.'}</div>
     <div className="plot-meta"><span>TREND COMPARISON</span><span>Logarithmic scales{usesSymlog ? ' · Symmetric log for zero or losses' : ''}</span></div>
     {hasData ? <div className="chart-canvas overlay-canvas"><ResponsiveContainer width="100%" height="100%"><LineChart data={timeline} margin={{ top: 24, right: 24, bottom: 12, left: 0 }} accessibilityLayer>
-      <CartesianGrid vertical horizontal={props => <SeriesGridLine x1={props.x1} x2={props.x2} y1={props.y1} y2={props.y2} labels={axisLabels}/>} stroke="#e8edf0" syncWithTicks/>
+      <CartesianGrid vertical horizontal={false} stroke="#e8edf0" syncWithTicks/>
       <XAxis dataKey="timestamp" type="number" scale="time" domain={[Date.UTC(firstYear, 0, 1), Date.UTC(lastYear, 11, 31)]} ticks={yearTicks} tickFormatter={value => String(new Date(Number(value)).getUTCFullYear())} tick={{ fontSize: 12, fill: '#7c8793', fontWeight: 500 }} tickLine={false} axisLine={false} minTickGap={30} dy={12}/>
-      <YAxis domain={domain} type="number" scale="linear" width={84} ticks={axisLabels.map(label => label.value)} interval={0} axisLine={{ stroke: '#e1e7e4' }} tickLine={false} allowDataOverflow tick={({ x, y, payload }) => {
-        const label = axisLabels.find(item => item.value === Number(payload.value));
-        return <g className={`draggable-series-${label?.key}`}><line x1={Number(x)} x2={Number(x) + 6} y1={Number(y)} y2={Number(y)} stroke="#d3ddd6"/><text x={Number(x) - 7} y={Number(y)} dy={4} textAnchor="end" fill={label?.color} fontSize={10} fontWeight={500}>{label?.name}</text></g>;
-      }}/>
+      <YAxis domain={domain} type="number" scale="linear" width={84} ticks={[]} tick={false} axisLine={{ stroke: '#e1e7e4' }} tickLine={false} allowDataOverflow/>
+      <SeriesAxisLabels labels={axisLabels} order={labelOrder}/>
       {spaced.filter(metric => metric.key !== 'close' && lineVisible(`${metric.key}:fit`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={`${metric.key}-regression`} data={metric.regressionData} type="linear" dataKey={metric.key} name={`${metric.title} log-linear fit`} stroke={metric.color} strokeWidth={selected === `${metric.key}:fit` ? 3 : 2} strokeOpacity={selected === `${metric.key}:fit` ? 0.65 : 0.4} dot={false} activeDot={false} tooltipType="none" legendType="none" isAnimationActive={false} style={{ cursor: 'grab' }}/>)}
       {spaced.filter(metric => lineVisible(`${metric.key}:actual`)).map(metric => <Line className={`draggable-series-${metric.key}`} key={metric.key} data={metric.data} type="linear" dataKey={metric.key} name={metric.title} stroke={metric.color} strokeWidth={selected === `${metric.key}:actual` ? 3.5 : metric.key === 'close' ? 1.6 : 3} strokeOpacity={metric.key === 'close' ? 0.65 : 1} dot={metric.key === 'close' ? false : { className: `draggable-series-${metric.key}`, r: 5, fill: '#fff', strokeWidth: 2.5, stroke: metric.color }} activeDot={false} connectNulls={false} isAnimationActive={false} style={{ cursor: 'grab' }}/>)}
-      <LineHoverLayer lines={hoverLines} onMove={(key, delta) => setOffsets(current => ({ ...current, [key]: (current[key] ?? 0) + delta }))}/>
+      <LineHoverLayer lines={hoverLines} onMove={(key, delta) => { setOffsets(current => ({ ...current, [key]: (current[key] ?? 0) + delta })); setLabelOrder(current => [...current.filter(item => item !== key), key]); }}/>
     </LineChart></ResponsiveContainer></div> : <div className="chart-empty">{lines.length ? 'All lines are hidden. Choose Show all to restore the chart.' : 'No comparable history is available. Refresh to try again.'}</div>}
     <div className="chart-footnote"><span className="split-status"><i/>Split-normalized EPS & price</span><span>Translucent lines: log-linear regression · Annual financials · Daily closing prices</span></div>
     <p className="overlay-note">Each line has its own logarithmic scale and vertical offset to make its trend clear. Compare direction and shape; slopes do not compare growth rates. Hover for actual values. Missing annual values remain gaps.</p>
