@@ -8,7 +8,7 @@ import uuid
 TTL_SECONDS = 60
 MAX_ENTRIES = 8
 _LOCK = threading.Lock()
-_SLOTS = threading.BoundedSemaphore(2)
+_SLOTS = threading.BoundedSemaphore(5)
 _JOBS = {}
 
 

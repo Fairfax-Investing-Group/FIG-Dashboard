@@ -77,6 +77,24 @@ class StudyPreloadTests(unittest.TestCase):
             fresh.assert_called_once()
             self.assertEqual(study['Company']['Ticker'], 'TEST')
 
+    def test_all_five_top_matches_can_preload_together(self):
+        release = threading.Event()
+        def fetch(*args):
+            self.assertTrue(release.wait(3))
+            return self.inputs()
+        jobs = []
+        with patch('server.studies.progressive_inputs', side_effect=fetch):
+            try:
+                for index in range(5):
+                    company = {**self.company, 'cik': index + 1, 'ticker': f'TEST{index}'}
+                    self.assertTrue(study_preload.start_preload(company))
+                    jobs.append(study_preload._JOBS[(index + 1, f'TEST{index}')])
+            finally:
+                release.set()
+                for job in jobs:
+                    with job.changed:
+                        self.assertTrue(job.changed.wait_for(lambda: job.done, timeout=3))
+
     def test_preload_limit_drops_extra_speculation_without_blocking_study_creation(self):
         with patch.object(study_preload._SLOTS, 'acquire', return_value=False):
             self.assertFalse(study_preload.start_preload(self.company))

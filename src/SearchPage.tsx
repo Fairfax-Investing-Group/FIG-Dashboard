@@ -12,24 +12,12 @@ export default function SearchPage({ onSelect, onPreload }: { onSelect: (company
   const [companies, setCompanies] = useState<Company[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
-  const intentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preloaded = useRef(new Map<string, number>());
-  const cancelIntent = () => {
-    if (intentTimer.current !== null) clearTimeout(intentTimer.current);
-    intentTimer.current = null;
+  const cancelPreload = () => {
+    if (preloadTimer.current !== null) clearTimeout(preloadTimer.current);
+    preloadTimer.current = null;
   };
-  const highlight = (company: Company) => {
-    cancelIntent();
-    if (!onPreload) return;
-    const key = `${company.cik}:${company.ticker}`;
-    if (Date.now() - (preloaded.current.get(key) ?? 0) < 60_000) return;
-    intentTimer.current = setTimeout(() => {
-      intentTimer.current = null;
-      preloaded.current.set(key, Date.now());
-      onPreload(company);
-    }, 150);
-  };
-  useEffect(() => cancelIntent, [query, searchOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -65,9 +53,18 @@ export default function SearchPage({ onSelect, onPreload }: { onSelect: (company
   }, [companies, search]);
 
   useEffect(() => {
-    if (searchOpen && matches[activeMatch]) highlight(matches[activeMatch]);
-    return cancelIntent;
-  }, [activeMatch, matches, searchOpen, onPreload]);
+    if (!searchOpen || !search || !onPreload || !matches.length) return;
+    preloadTimer.current = setTimeout(() => {
+      preloadTimer.current = null;
+      for (const company of matches.slice(0, 5)) {
+        const key = `${company.cik}:${company.ticker}`;
+        if (Date.now() - (preloaded.current.get(key) ?? 0) < 60_000) continue;
+        preloaded.current.set(key, Date.now());
+        onPreload(company);
+      }
+    }, 50);
+    return cancelPreload;
+  }, [query, matches, searchOpen, onPreload]);
 
   return (
     <main className="home-page">
@@ -113,7 +110,7 @@ export default function SearchPage({ onSelect, onPreload }: { onSelect: (company
               event.preventDefault(); setSearchOpen(true);
               setActiveMatch(current => matches.length ? (current + (event.key === 'ArrowDown' ? 1 : matches.length - 1) + matches.length) % matches.length : -1);
             } else if (event.key === 'Enter' && searchOpen && matches.length) {
-              event.preventDefault(); cancelIntent(); onSelect(matches[activeMatch >= 0 ? activeMatch : 0]); setSearchOpen(false);
+              event.preventDefault(); cancelPreload(); onSelect(matches[activeMatch >= 0 ? activeMatch : 0]); setSearchOpen(false);
             }
           }}
           autoComplete="off"
@@ -135,7 +132,7 @@ export default function SearchPage({ onSelect, onPreload }: { onSelect: (company
 
         {status === 'ready' && search && matches.length > 0 && <ul className="results" role="listbox" aria-label="Closest matching companies">
           {matches.map((company, index) => <li key={`${company.cik}-${company.ticker}`}>
-            <button id={`company-option-${index}`} role="option" aria-selected={activeMatch === index} className="company-result" onMouseEnter={() => { setActiveMatch(index); highlight(company); }} onMouseLeave={cancelIntent} onFocus={() => { setActiveMatch(index); highlight(company); }} onBlur={cancelIntent} onClick={() => { cancelIntent(); onSelect(company); setSearchOpen(false); }} aria-label={`Create stock study for ${company.name}, ${company.ticker}`}>
+            <button id={`company-option-${index}`} role="option" aria-selected={activeMatch === index} className="company-result" onMouseEnter={() => setActiveMatch(index)} onFocus={() => setActiveMatch(index)} onClick={() => { cancelPreload(); onSelect(company); setSearchOpen(false); }} aria-label={`Create stock study for ${company.name}, ${company.ticker}`}>
               <span className="company-info"><strong>{company.name}</strong><span>{company.ticker}<span className="separator">·</span>{company.exchange || 'Exchange unavailable'}</span></span>
               <span className="result-action">Create study <span aria-hidden="true">→</span></span>
             </button>

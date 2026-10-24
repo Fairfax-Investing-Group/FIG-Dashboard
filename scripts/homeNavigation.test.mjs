@@ -125,11 +125,13 @@ test('home company search selects the correct issuer and login opens without a s
       input.dispatchEvent(new window.Event('input', { bubbles: true }));
     });
     assert.equal(document.querySelectorAll('.company-result').length, 10);
+    const topFive = ['TEST0', 'TEST1', 'TEST10', 'TEST11', 'TEST2'];
+    assert.deepEqual(preloads, [], 'Preloading waits for a pause in typing');
     assert.equal(document.getElementById('search-results').hidden, false);
     await React.act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
     assert.equal(input.getAttribute('aria-activedescendant'), 'company-option-0');
-    await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
-    assert.deepEqual(preloads, ['TEST0'], 'Keyboard highlighting preloads the active match');
+    await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 70)); });
+    assert.deepEqual(preloads, topFive, 'Typing pause preloads the top five matches without needing a highlight');
     await React.act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     assert.equal(selected.ticker, 'TEST0');
     assert.equal(document.getElementById('search-results').hidden, true);
@@ -138,24 +140,26 @@ test('home company search selects the correct issuer and login opens without a s
       input.dispatchEvent(new window.Event('input', { bubbles: true }));
     });
     assert.equal(document.querySelectorAll('.company-result').length, 1);
+    // Continue typing before the Apple debounce expires: only Microsoft should warm.
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, 'msft');
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 70)); });
+    assert.deepEqual(preloads, [...topFive, 'MSFT'], 'More typing cancels the previous debounce');
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, 'apple');
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 70)); });
+    assert.deepEqual(preloads, [...topFive, 'MSFT', 'AAPL'], 'Fewer than five matches preload all available results');
     const apple = document.querySelector('.company-result');
     await React.act(async () => {
       apple.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
-      apple.dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true }));
-      await new Promise(resolve => setTimeout(resolve, 180));
+      input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 70));
     });
-    assert.deepEqual(preloads, ['TEST0'], 'Passing over a result does not preload it');
-    await React.act(async () => {
-      apple.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
-      await new Promise(resolve => setTimeout(resolve, 180));
-    });
-    assert.deepEqual(preloads, ['TEST0', 'AAPL']);
-    await React.act(async () => {
-      apple.dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true }));
-      apple.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
-      await new Promise(resolve => setTimeout(resolve, 180));
-    });
-    assert.deepEqual(preloads, ['TEST0', 'AAPL'], 'Repeated highlighting reuses the warm result');
+    assert.deepEqual(preloads, [...topFive, 'MSFT', 'AAPL'], 'Hover and keyboard highlighting do not start extra preloads');
     await React.act(async () => document.querySelector('.company-result').click());
     assert.equal(selected.ticker, 'AAPL');
     window.location.hash = '/login';
