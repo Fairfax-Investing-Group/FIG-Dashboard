@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
-import type { AnnualRow, FactSource, Metric, Study } from './types';
+import type { AnnualRow, Metric, Study } from './types';
 import { annualGrowth, fiveYearEstimate, logLinearRegression } from './financialMath';
 import { nearestChartLine, nearestObservation, interpolatedObservation, stackChartLabels } from './chartInteraction';
 
@@ -17,12 +17,6 @@ function money(value: number | null, currency: string | null, eps = false): stri
 }
 function displayDate(date: string) {
   return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
-function SourceLink({ source, cik, value, currency, eps }: { source: FactSource | null; cik: number; value: number | null; currency: string | null; eps?: boolean }) {
-  if (value === null || !source) return <span title="Not available in supported SEC facts">—</span>;
-  const text = money(value, currency, eps);
-  if (!source.accession) return <span>{text}</span>;
-  return <a href={`https://www.sec.gov/Archives/edgar/data/${cik}/${source.accession.replaceAll('-', '')}/${source.accession}-index.html`} target="_blank" rel="noreferrer" title={`${source.concept} · filed ${source.filed} · period ended ${source.end}`}>{text}</a>;
 }
 
 type ChartKey = Metric | 'close';
@@ -333,14 +327,14 @@ function FinancialTable({ annual, study }: { annual: AnnualRow[]; study: Study }
         const estimate = forecastKey ? fiveYearEstimate(latest?.[metric.key] ?? null, forecasts[forecastKey]) : null;
         return <tr key={metric.key}>
           <th scope="row">{labels[metric.key]}</th>
-          {rows.map(row => <td key={row.periodEnd}><SourceLink source={row[`${metric.key}Source`]} cik={study.company.cik} value={row[metric.key] === null ? null : row[metric.key]! / scale} currency={null} eps={metric.key === 'eps'}/></td>)}
+          {rows.map(row => <td key={row.periodEnd}>{money(row[metric.key] === null ? null : row[metric.key]! / scale, null, metric.key === 'eps')}</td>)}
           <td className="calculated-column" title={first && latest ? `Log-linear regression across available fiscal years: ${displayDate(first.periodEnd)} to ${displayDate(latest.periodEnd)}` : undefined}>{growth === null ? '—' : `${growth.toFixed(1)}%`}</td>
           <td className="forecast-cell">{forecastKey ? <input type="number" step="0.1" min="-100" value={forecasts[forecastKey]} placeholder="—" aria-label={`${metric.title} annual forecast percentage`} onChange={event => setForecasts(current => ({ ...current, [forecastKey]: event.target.value }))}/> : '—'}</td>
           <td className="estimate-cell">{money(estimate === null ? null : estimate / scale, null, metric.key === 'eps')}</td>
         </tr>;
       })}</tbody>
     </table>{!rows.length && <p className="table-empty">Annual financials could not be loaded for this company.</p>}</div>
-    <p className="table-note">Sales and pre-tax profit are in millions; EPS is split-normalized. Click historical values for SEC filings. Growth uses log-linear regression across all available fiscal years. It requires at least two years of positive values; missing years are skipped and zero or negative values make growth unavailable. Enter annual sales and EPS forecasts to calculate five-year estimates from each metric’s latest available year. Forecasts are your assumptions. — means unavailable.</p>
+    <p className="table-note">Sales and pre-tax profit are in millions; EPS is split-normalized. Growth uses log-linear regression across all available fiscal years. It requires at least two years of positive values; missing years are skipped and zero or negative values make growth unavailable. Enter annual sales and EPS forecasts to calculate five-year estimates from each metric’s latest available year. Forecasts are your assumptions. — means unavailable.</p>
   </section>;
 }
 
