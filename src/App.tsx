@@ -1,5 +1,5 @@
 import { AuthProvider } from './auth/AuthProvider';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
 import LoginPage from './LoginPage';
 import StudyPage from './StudyPage';
@@ -11,6 +11,16 @@ import { readStudyStream } from './studyStream';
 import { studyView } from './studyDocument';
 import { apiUrl } from './lib/api';
 import { loadStaticStudy } from './lib/staticStudy';
+
+type BrowserPreload = { controller: AbortController; document?: StudyDocument; view?: Study; renderedDocument?: StudyDocument; expires: number; timer: ReturnType<typeof setTimeout> };
+const companyKey = (company: Company) => `${company.cik}:${company.ticker}`;
+const previewView = (entry: BrowserPreload, page: Study) => {
+  if (entry.view?.id === page.id && entry.renderedDocument === entry.document) return entry.view;
+  const document = entry.document!;
+  entry.renderedDocument = document;
+  entry.view = studyView({ ...document, Study: { ...document.Study, StudyID: page.id, DateCreated: page.createdAt } });
+  return entry.view;
+};
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
 
@@ -47,15 +57,25 @@ function AppContent() {
   const cache = useRef(new StudyCache());
   const request = useRef<AbortController | null>(null);
   const preloadGroup = useRef<string | null>(null);
+  const browserPreloads = useRef(new Map<string, BrowserPreload>());
   const [restoredInputs, setRestoredInputs] = useState<{ id: string; saved: SavedStudy } | null>(null);
   const [preparedPages, setPreparedPages] = useState<Study[]>([]);
   const pageMountWaiters = useRef<(() => void)[]>([]);
   const preparePages = useCallback((companies: Company[]) => new Promise<void>(resolve => {
     pageMountWaiters.current.push(resolve);
-    setPreparedPages(previous => companies.slice(0, 5).map(company =>
-      previous.find(page => page.company.cik === company.cik && page.company.ticker === company.ticker)
-        ?? pendingStudy(company, crypto.randomUUID())));
+    if (!companies.length) clearBrowserPreloads();
+    setPreparedPages(previous => companies.slice(0, 5).map(company => {
+      const page = previous.find(page => companyKey(page.company) === companyKey(company)) ?? pendingStudy(company, crypto.randomUUID());
+      const cached = browserPreloads.current.get(companyKey(company));
+      return cached?.document && cached.expires > Date.now() ? previewView(cached, page) : page;
+    }));
   }), []);
+  function clearBrowserPreloads() {
+    for (const entry of browserPreloads.current.values()) { entry.controller.abort(); clearTimeout(entry.timer); }
+    browserPreloads.current.clear();
+  }
+  useEffect(() => () => clearBrowserPreloads(), []);
+
   useEffect(() => {
     // Child pages have mounted before this passive effect resolves the first stage.
     pageMountWaiters.current.splice(0).forEach(resolve => resolve());
@@ -78,6 +98,7 @@ function AppContent() {
       const next = readRoute();
       const id = /^\/study\/([a-f0-9-]{36})$/.exec(next)?.[1];
       const saved = id ? cache.current.get(id) : null;
+      clearBrowserPreloads();
       setPreparedPages([]);
       setPending(null);
       setPendingView(id && !saved ? unknownPendingStudy(id) : null);
@@ -148,13 +169,45 @@ function AppContent() {
     return () => controller.abort();
   }, [studyId, dataStage, readyStudyId, loading, route, detailsRetry]);
 
-  const preloadStudy = useCallback((company: Company, priority = 0): Promise<boolean> => {
-    // Scope speculative work to this search so opening a study can discard it.
+  const preloadStudy = useCallback(async (company: Company, priority = 0): Promise<boolean> => {
     preloadGroup.current ??= crypto.randomUUID();
-    return fetch(apiUrl('/api/studies/preload'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker: company.ticker, cik: company.cik, preloadGroup: preloadGroup.current, priority }),
-    }).then(response => response.ok).catch(() => false);
+    const group = preloadGroup.current, key = companyKey(company);
+    const previous = browserPreloads.current.get(key);
+    if (previous) { previous.controller.abort(); clearTimeout(previous.timer); browserPreloads.current.delete(key); }
+    // Bound payloads, readers, and timers even while the closest match changes.
+    while (browserPreloads.current.size >= 5) {
+      const oldest = browserPreloads.current.keys().next().value!;
+      const entry = browserPreloads.current.get(oldest)!;
+      entry.controller.abort(); clearTimeout(entry.timer); browserPreloads.current.delete(oldest);
+    }
+    const controller = new AbortController();
+    const entry: BrowserPreload = { controller, expires: Date.now() + 55_000, timer: setTimeout(() => {
+      if (browserPreloads.current.get(key) !== entry) return;
+      controller.abort(); browserPreloads.current.delete(key);
+      setPreparedPages(pages => pages.map(page => companyKey(page.company) === key ? pendingStudy(page.company, page.id) : page));
+    }, 55_000) };
+    browserPreloads.current.set(key, entry);
+    const publish = (document: StudyDocument) => {
+      if (controller.signal.aborted || browserPreloads.current.get(key) !== entry) return;
+      entry.document = document;
+      startTransition(() => setPreparedPages(pages => pages.map(page => companyKey(page.company) === key ? previewView(entry, page) : page)));
+    };
+    try {
+      const response = await fetch(apiUrl('/api/studies/preload'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+        body: JSON.stringify({ ticker: company.ticker, cik: company.cik, preloadGroup: group, priority }), signal: controller.signal,
+      });
+      if (!response.ok) throw new Error('Preload busy');
+      if (response.headers.get('content-type')?.includes('application/x-ndjson')) {
+        publish(await readStudyStream(response, publish, readResponse));
+      }
+      return !controller.signal.aborted;
+    } catch {
+      if (browserPreloads.current.get(key) === entry) {
+        clearTimeout(entry.timer); browserPreloads.current.delete(key);
+      }
+      return false;
+    }
   }, []);
 
   async function createStudy(company: Company, retryId?: string, savedInputs?: SavedStudy) {
@@ -164,8 +217,12 @@ function AppContent() {
     const prepared = savedInputs ? undefined : preparedPages.find(page => page.company.cik === company.cik && page.company.ticker === company.ticker);
     const id = retryId ?? prepared?.id ?? crypto.randomUUID();
     const group = preloadGroup.current;
+    const cachedPreview = browserPreloads.current.get(companyKey(company));
+    const page = prepared ?? pendingStudy(company, id);
     const initial = retryId && pendingView?.id === retryId ? pendingView
-      : study && study.company.cik === company.cik ? { ...study, id } : prepared ?? pendingStudy(company, id);
+      : cachedPreview?.document && cachedPreview.expires > Date.now() ? previewView(cachedPreview, page)
+      : study && study.company.cik === company.cik ? { ...study, id } : pendingStudy(company, id);
+    clearBrowserPreloads();
     rememberStudyCompany(id, company);
     if (!retryId) setRestoredInputs(savedInputs ? { id, saved: savedInputs } : null);
     setPendingView(initial);
@@ -208,6 +265,7 @@ function AppContent() {
 
   function backToSearch() {
     request.current?.abort();
+    clearBrowserPreloads();
     setPending(null);
     setError(null);
     setLoading(false);
@@ -223,7 +281,7 @@ function AppContent() {
   const showingStudy = Boolean(displayedStudy && (pendingView || route));
   const pageStudies = showingStudy && displayedStudy ? [displayedStudy] : !route ? preparedPages : [];
   return <>
-  {pageStudies.map(pageStudy => <div key={pageStudy.id} hidden={!showingStudy} inert={!showingStudy}>
+  {pageStudies.map(pageStudy => <div key={pageStudy.id} className={!showingStudy ? 'prepared-study-page' : undefined} aria-hidden={!showingStudy} inert={!showingStudy}>
   <StudyPage
     study={pageStudy} active={showingStudy} initialSavedStudy={restoredInputs?.id === pageStudy.id ? restoredInputs.saved : undefined} onBack={backToSearch}
     staticSnapshot={studyDocument?.Metadata.StaticSnapshot}

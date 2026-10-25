@@ -60,6 +60,29 @@ class Preload:
             self.latest = None
             self.result = None
             self.error = None
+            self.changed.notify_all()
+
+    def preview(self, on_progress):
+        """Watch unsaved inputs without consuming the selected-study checkpoint."""
+        version, latest = 0, None
+        while True:
+            with self.changed:
+                self.changed.wait_for(lambda: self.version != version or self.done or self.discarded)
+                if self.discarded:
+                    raise RuntimeError('Preload discarded.')
+                document = self.latest if self.version != version else None
+                version = self.version
+                done, error = self.done, self.error
+            if document is not None:
+                latest = document
+                if on_progress(document) is False:
+                    return latest
+            if done:
+                if error:
+                    raise error
+                if latest is None:
+                    raise RuntimeError('Preload no longer available.')
+                return latest
 
     def consume(self, study_id, created_at, on_progress):
         version = 0
@@ -120,6 +143,11 @@ def start_preload(company, group=None, priority=None):
         job = _JOBS[key] = Preload(company, group, priority)
         threading.Thread(target=job.run, name='study-preload', daemon=True).start()
         return True
+
+
+def get_preload(company, group=None):
+    with _LOCK:
+        return _JOBS.get(preload_key(company, group))
 
 
 def take_preload(company, group=None):

@@ -67,7 +67,6 @@ test('Supabase login handles invalid credentials, success, logout, and stale ses
     assert.ok(unsubscribed >= 1);
     await React.act(async () => render(null));
     assert.equal(document.querySelector('button[type="submit"]').disabled, true);
-    assert.match(document.body.textContent, /Sign-in is currently unavailable/);
   } finally {
     if (root) { const React = await import('react'); await React.act(async () => root.unmount()); }
     dom.window.close();

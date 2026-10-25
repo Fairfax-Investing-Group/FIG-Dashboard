@@ -11,7 +11,7 @@ import re
 import threading
 
 from server.studies import ROOT, company_for, create_study, get_study, complete_study
-from server.study_preload import start_preload, clear_unselected_preloads
+from server.study_preload import start_preload, clear_unselected_preloads, get_preload
 from server.quotes import get_quote
 from server.news import get_news
 from server.fundamentals_view import fundamentals_view, study_view
@@ -85,7 +85,7 @@ class Handler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def stream_study(self, company, study_id, preload_group=None, completion=False):
+    def stream_study(self, company, study_id, preload_group=None, completion=False, preload_job=None):
         # Flush each small NDJSON event, including its gzip synchronization marker.
         # Whole-response buffering would hold back the early sections.
         self.send_response(200)
@@ -104,7 +104,7 @@ class Handler(SimpleHTTPRequestHandler):
         def event(kind, document=None, error=None):
             nonlocal connected
             if not connected:
-                return
+                return False
             value = {'type': kind}
             if document is not None:
                 value['document'] = study_view(document) if completion else fundamentals_view(document)
@@ -119,16 +119,22 @@ class Handler(SimpleHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 # Persist the study even if the user navigated away mid-stream.
                 connected = False
+            return connected
         try:
-            if completion:
+            if preload_job is not None:
+                study = preload_job.preview(lambda document: event('progress', document))
+            elif completion:
                 study = complete_study(study_id, on_progress=lambda document: event('progress', document))
             else:
                 study = create_study(company, fundamentals_only=True, study_id=study_id,
                                      on_progress=lambda document: event('progress', document), preload_group=preload_group)
             event('ready', study)
         except Exception:
-            traceback.print_exc()
-            event('error', error='Could not save this study. Please try again.')
+            if preload_job is not None and preload_job.discarded:
+                connected = False
+            else:
+                traceback.print_exc()
+                event('error', error='Could not save this study. Please try again.')
         finally:
             if compressor and connected:
                 try:
@@ -215,6 +221,10 @@ class Handler(SimpleHTTPRequestHandler):
             if priority is not None and (type(priority) is not int or not 0 <= priority <= 4):
                 return self.json_response(400, {'error': 'Invalid preload priority.'})
             accepted = start_preload(company, preload_group, priority)
+            if accepted and 'application/x-ndjson' in self.headers.get('Accept', ''):
+                job = get_preload(company, preload_group)
+                if job is not None:
+                    return self.stream_study(company, None, preload_group, preload_job=job)
             return self.json_response(202 if accepted else 429, {'preloading': accepted})
         slots = COMPLETION_SLOTS if completion else STUDY_SLOTS
         if not slots.acquire(blocking=False):

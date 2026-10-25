@@ -29,6 +29,24 @@ excluded years survive each update.
   finish, but discarded results cannot refill those caches. Release completed
   checkpoints, stream readers, and unused enrichment locks.
 
+## Browser preloading
+
+Search preload requests now accept NDJSON previews. Each preview streams the
+Fundamentals projection to the browser without saving a study or consuming its
+server-side inputs. Prepared pages receive the financial values and weekly
+prices before selection. They render offscreen at the final viewport width so
+chart layout can happen before the page is revealed.
+
+At most five browser payloads/readers are retained. They expire after 55 seconds
+(ahead of the server's 60-second TTL), and are aborted/cleared when selecting a
+study or clearing/leaving search. The selected page keeps its mounted component
+and existing edits while the normal creation request persists the document.
+Daily prices and full enrichment still start after selection.
+
+The original API-only timing samples below exclude browser rendering and do not
+measure this improvement's click-to-paint latency. Browser UI verification was
+not performed.
+
 ## Measurements
 
 Local backend measurements used AAPL, MSFT, and NVDA with peers disabled on both

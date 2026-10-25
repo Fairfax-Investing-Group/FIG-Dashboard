@@ -67,7 +67,7 @@ test('pending Fundamentals shows the real tables, early quote, editable forecast
     assert.equal(document.querySelectorAll('.pending-period').length, 0);
     assert.equal(document.querySelector('.chart-pending'), null);
     assert.equal(document.querySelector('.study-background-status'), null);
-    assert.equal(document.querySelector('.export-button').getAttribute('href'), '/api/studies/pending-test');
+    assert.equal(document.querySelector('.export-button').getAttribute('href'), '/api/studies/pending-test?download=1');
     assert.match(document.querySelector('[aria-labelledby="financial-table-title"]').textContent, /100/);
   } finally {
     if (root) { const React = await import('react'); await React.act(async () => root.unmount()); }
