@@ -37,7 +37,9 @@ Variables** and create:
 VITE_STUDY_API_URL=https://YOUR-SERVICE.onrender.com
 ```
 
-Use the origin only, without `/api`. `VITE_API_BASE_URL` is also supported for
+The Pages workflow defaults to `https://fig-dashboard.onrender.com` if neither
+repository variable is set. Set a repository variable to override that deployed
+service address. Use the origin only, without `/api`. `VITE_API_BASE_URL` is also supported for
 existing deployments; `VITE_STUDY_API_URL` takes priority when both are set. The Pages workflow now passes this variable
 to the Vite build. Keep the existing Supabase variables configured. Push these
 changes and rerun **Deploy GitHub Pages** so the new origin is included in the
