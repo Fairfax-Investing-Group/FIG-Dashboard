@@ -12,15 +12,17 @@ import { studyView, studyCompany } from './studyDocument';
 import { apiUrl } from './lib/api';
 import { loadStaticStudy } from './lib/staticStudy';
 import { readStudyResponse, postStudy, isAbortError } from './lib/studyApi';
+import { preloadPortfolio } from './lib/portfolioPreload';
 
 type BrowserPreload = { controller: AbortController; document?: StudyDocument; view?: Study; renderedDocument?: StudyDocument; expires: number; timer: ReturnType<typeof setTimeout> };
 const disposePreload = (entry: BrowserPreload) => { entry.controller.abort(); clearTimeout(entry.timer); };
 const companyKey = (company: Company) => `${company.cik}:${company.ticker}`;
+const pageView = (document: StudyDocument, page: Study) => studyView({ ...document, Study: { ...document.Study, StudyID: page.id, DateCreated: page.createdAt } });
 const previewView = (entry: BrowserPreload, page: Study) => {
   if (entry.view?.id === page.id && entry.renderedDocument === entry.document) return entry.view;
   const document = entry.document!;
   entry.renderedDocument = document;
-  entry.view = studyView({ ...document, Study: { ...document.Study, StudyID: page.id, DateCreated: page.createdAt } });
+  entry.view = pageView(document, page);
   return entry.view;
 };
 
@@ -68,6 +70,14 @@ function AppContent() {
   }
   useEffect(() => () => clearBrowserPreloads(), []);
 
+  const onHome = !route && !pendingView;
+  useEffect(() => {
+    if (!onHome) return;
+    const controller = new AbortController();
+    void preloadPortfolio(cache.current, controller.signal, () => browserPreloads.current.size > 0).catch(() => { /* Warming is optional. */ });
+    return () => controller.abort();
+  }, [onHome]);
+
   useEffect(() => {
     // Child pages have mounted before this passive effect resolves the first stage.
     pageMountWaiters.current.splice(0).forEach(resolve => resolve());
@@ -107,31 +117,53 @@ function AppContent() {
     if (!route || route === '/login') { setStudyDocument(null); return; }
     const match = /^\/study\/([a-f0-9-]{36})$/.exec(route);
     if (!match) { setError('This study link is invalid. Return to search to create a study.'); return; }
-    const cached = cache.current.get(match[1]);
-    if (cached?.SchemaVersion === 1) { setStudyDocument(cached); setPendingView(null); setLoading(false); return; }
+    const id = match[1];
+    const memory = cache.current.get(id);
+    if (memory?.SchemaVersion === 1 && cache.current.isFresh(memory) && loadRetry === 0) {
+      setStudyDocument(memory); setPendingView(null); setLoading(false); return;
+    }
     const controller = new AbortController();
     request.current = controller;
     setLoading(true);
     setError(null);
-    setPendingView(previous => previous?.id === match[1] ? previous : unknownPendingStudy(match[1]));
-    fetch(apiUrl(`/api/studies/${match[1]}?view=study`), { signal: controller.signal })
-      .then(readStudyResponse)
-      .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyCompany(data)); setStudyDocument(data); setPendingView(null); })
-      .catch(async error => {
-        if (controller.signal.aborted || isAbortError(error)) return;
-        try {
-          const data = await loadStaticStudy(match[1], controller.signal);
-          if (controller.signal.aborted) return;
-          cache.current.set(data.Study.StudyID, data);
-          rememberStudyCompany(data.Study.StudyID, studyCompany(data));
-          setStudyDocument(data);
-          setPendingView(null);
-        } catch (staticError) {
-          if (controller.signal.aborted || isAbortError(staticError)) return;
-          setError(staticError instanceof Error ? staticError.message : error.message);
+    setPendingView(previous => memory ? null : previous?.id === id ? previous : unknownPendingStudy(id));
+    const show = (data: StudyDocument) => {
+      if (controller.signal.aborted) return;
+      rememberStudyCompany(data.Study.StudyID, studyCompany(data));
+      setStudyDocument(data); setPendingView(null);
+    };
+    void (async () => {
+      let cached = memory;
+      try {
+        cached ??= await cache.current.restore(id);
+        if (controller.signal.aborted) return;
+        if (cached) show(cached);
+        let data: StudyDocument;
+        if (cached?.Metadata.StaticSnapshot) data = await loadStaticStudy(id, controller.signal);
+        else {
+          const response = await fetch(apiUrl(`/api/studies/${id}?view=study`), { signal: controller.signal });
+          if (response.status === 404 && cached) {
+            // Render may have restarted since this browser last opened the ID.
+            const company = studyCompany(cached);
+            data = await postStudy('/api/studies?stage=fundamentals',
+              { ticker: company.ticker, cik: company.cik, studyId: id }, controller.signal, show);
+          } else data = await readStudyResponse(response);
         }
-      })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        if (!controller.signal.aborted) { cache.current.set(data.Study.StudyID, data); show(data); }
+      } catch (error) {
+        if (controller.signal.aborted || isAbortError(error)) return;
+        if (cached) { show(cached); return; } // Keep usable data through offline/provider failures.
+        try {
+          const data = await loadStaticStudy(id, controller.signal);
+          if (controller.signal.aborted) return;
+          cache.current.set(data.Study.StudyID, data); show(data);
+        } catch (staticError) {
+          if (!controller.signal.aborted && !isAbortError(staticError)) {
+            setError(staticError instanceof Error ? staticError.message : 'Could not load the study.');
+          }
+        }
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    })();
     return () => controller.abort();
   }, [route, loadRetry]);
 
@@ -145,7 +177,7 @@ function AppContent() {
     setDetailsStatus('loading');
     postStudy(`/api/studies/${studyId}/complete?view=study`, {}, controller.signal, data => {
       if (!controller.signal.aborted && readRoute() === `/study/${studyId}`) {
-        cache.current.set(studyId, data);
+        cache.current.set(studyId, data, false);
         setStudyDocument(data);
       }
     }).then(data => {
@@ -182,6 +214,10 @@ function AppContent() {
       entry.document = document;
       startTransition(() => setPreparedPages(pages => pages.map(page => companyKey(page.company) === key ? previewView(entry, page) : page)));
     };
+    let receivedLive = false;
+    void cache.current.restoreCompany(company).then(document => {
+      if (document && !receivedLive) publish(document);
+    });
     try {
       const response = await fetch(apiUrl('/api/studies/preload'), {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
@@ -189,7 +225,8 @@ function AppContent() {
       });
       if (!response.ok) throw new Error('Preload busy');
       if (response.headers.get('content-type')?.includes('application/x-ndjson')) {
-        publish(await readStudyStream(response, publish, readStudyResponse));
+        const document = await readStudyStream(response, document => { receivedLive = true; publish(document); }, readStudyResponse);
+        receivedLive = true; publish(document);
       }
       return !controller.signal.aborted;
     } catch {
@@ -209,8 +246,10 @@ function AppContent() {
     const group = preloadGroup.current;
     const cachedPreview = browserPreloads.current.get(companyKey(company));
     const page = prepared ?? pendingStudy(company, id);
+    const recent = cache.current.findCompany(company);
     const initial = retryId && pendingView?.id === retryId ? pendingView
       : cachedPreview?.document && cachedPreview.expires > Date.now() ? previewView(cachedPreview, page)
+      : recent ? pageView(recent, page)
       : study && study.company.cik === company.cik ? { ...study, id } : pendingStudy(company, id);
     clearBrowserPreloads();
     rememberStudyCompany(id, company);
@@ -223,11 +262,18 @@ function AppContent() {
     setDetailsStatus('idle');
     setError(null);
     setLoading(true);
+    let receivedLive = false;
+    if (!retryId && !cachedPreview?.document && !recent) {
+      void cache.current.restoreCompany(company).then(document => {
+        if (document && !receivedLive && !controller.signal.aborted) setPendingView(pageView(document, page));
+      });
+    }
     try {
       let data: StudyDocument;
       try {
         data = await postStudy('/api/studies?stage=fundamentals',
           { ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }, controller.signal, document => {
+          receivedLive = true;
           if (!controller.signal.aborted) setPendingView(studyView(document));
         });
       } catch (apiError) {
@@ -235,6 +281,7 @@ function AppContent() {
         data = await loadStaticStudy(company.ticker, controller.signal);
       }
       if (controller.signal.aborted) return;
+      receivedLive = true;
       cache.current.set(data.Study.StudyID, data);
       if (savedInputs) setRestoredInputs({ id: data.Study.StudyID, saved: savedInputs });
       setStudyDocument(data);

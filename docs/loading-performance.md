@@ -47,6 +47,33 @@ The original API-only timing samples below exclude browser rendering and do not
 measure this improvement's click-to-paint latency. Browser UI verification was
 not performed.
 
+## Persistent recent studies and portfolio warming
+
+Browser Cache Storage now retains provider-only study projections across reloads:
+up to 24 documents or 16 MiB, expiring after seven days. Four decoded studies stay
+in memory. Fresh memory hits (under five minutes) reopen without another study
+request. Disk reloads display cached data before background revalidation; a 404
+after a Render restart recreates the original ID from cached company identity.
+Failed revalidation retains cached data. Corrupt/expired entries and unavailable
+browser storage fall back to normal loading. Supabase inputs and sessions are
+not part of this cache.
+
+Entering home immediately queues every holding from the published snapshot index.
+Two low-priority CDN downloads run at a time, yielding to active search preloads;
+leaving home aborts active downloads and stops the remaining queue. Fresh disk
+entries skip repeat downloads. These portfolio entries are retained separately
+from short-lived search speculation, and warming cannot evict recent studies
+from memory. Selecting a company still requests fresh live data in parallel with
+displaying its cached values.
+
+Snapshot export also writes compact `.view.json` files using the same server
+projection as the live study API. The original ten checked-in snapshots total
+7,838,619 bytes; their compact views total 1,438,052 bytes (81.7% smaller before
+HTTP compression). Full export files remain available. New checks cover reloads,
+expiry, size/entry bounds, storage failures, company identity matching, Render-ID
+recovery, foreground priority, bounded portfolio concurrency, and cancellation.
+121 Python tests, 69 JavaScript tests, and the production build passed.
+
 ## Measurements
 
 The October 24 code reuse pass additionally:

@@ -26,6 +26,7 @@ test('Fundamentals mounts before completion; background retries and merges prese
   let creates = 0;
   globalThis.fetch = (url, options) => {
     calls.push({ url, options });
+    if (url === '/studies/index.json') return Promise.resolve(response({ studies: [] }));
     if (url === '/api/studies/preload/clear') return Promise.resolve(response({ cleared: 4 }));
     if (url === '/api/studies/preload') {
       assert.equal(options.headers.Accept, 'application/x-ndjson');
@@ -78,10 +79,11 @@ test('Fundamentals mounts before completion; background retries and merges prese
     root = createRoot(document.getElementById('root'));
     await React.act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(App))));
     await click('Highlight result');
-    assert.equal(calls[0].url, '/api/studies/preload');
-    const preloadGroup = JSON.parse(calls[0].options.body).preloadGroup;
+    const preloadCall = calls.find(call => call.url === '/api/studies/preload');
+    assert.ok(preloadCall);
+    const preloadGroup = JSON.parse(preloadCall.options.body).preloadGroup;
     assert.ok(preloadGroup);
-    assert.deepEqual(JSON.parse(calls[0].options.body), { ticker: 'TEST', cik: 123, preloadGroup, priority: 0 });
+    assert.deepEqual(JSON.parse(preloadCall.options.body), { ticker: 'TEST', cik: 123, preloadGroup, priority: 0 });
     assert.equal(document.querySelectorAll('[data-study]').length, 5);
     const preparedPage = [...document.querySelectorAll('[data-study]')].find(page => page.dataset.ticker === 'TEST');
     assert.ok(preparedPage.closest('.prepared-study-page'), 'Prepared page stays offscreen while search is open');
