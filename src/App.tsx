@@ -17,6 +17,15 @@ import { preloadPortfolio } from './lib/portfolioPreload';
 type BrowserPreload = { controller: AbortController; document?: StudyDocument; view?: Study; renderedDocument?: StudyDocument; expires: number; timer: ReturnType<typeof setTimeout> };
 const disposePreload = (entry: BrowserPreload) => { entry.controller.abort(); clearTimeout(entry.timer); };
 const companyKey = (company: Company) => `${company.cik}:${company.ticker}`;
+const hasStudyData = (study: Study) => study.prices.length > 0 || study.annual.some(row =>
+  [row.sales, row.eps, row.pretaxProfit, row.bookValuePerShare, row.freeCashFlowPerShare].some(value => value != null));
+const hasDocumentData = (document: StudyDocument) => document.DailyPrices.length > 0 || Boolean(document.WeeklyPrices?.length)
+  || document.AnnualData.some(row => [row.Sales, row.EPS, row.PTP, row.BookValue, row.CashFlow].some(value => value != null));
+type RetainedView = { study: Study; until: 'fundamentals' | 'complete' };
+const retainedSnapshot = (study: Study, document?: StudyDocument): RetainedView | null => hasStudyData(study)
+  ? { study, until: document?.Metadata.DataStage === 'fundamentals' ? 'fundamentals' : 'complete' } : null;
+const afterReady = (previous: RetainedView | null, document: StudyDocument) =>
+  document.Metadata.DataStage !== 'fundamentals' || previous?.until === 'fundamentals' ? null : previous;
 const pageView = (document: StudyDocument, page: Study) => studyView({ ...document, Study: { ...document.Study, StudyID: page.id, DateCreated: page.createdAt } });
 const previewView = (entry: BrowserPreload, page: Study) => {
   if (entry.view?.id === page.id && entry.renderedDocument === entry.document) return entry.view;
@@ -35,6 +44,9 @@ export default function App() {
 function AppContent() {
   const [route, setRoute] = useState(readRoute);
   const [studyDocument, setStudyDocument] = useState<StudyDocument | null>(null);
+  // Keep one coherent populated snapshot visible while its replacement streams.
+  // The live document still drives persistence and background completion.
+  const [retainedView, setRetainedView] = useState<RetainedView | null>(null);
   const study = useMemo(() => studyDocument?.SchemaVersion === 1 ? studyView(studyDocument) : null, [studyDocument, studyView]);
   const [pending, setPending] = useState<Company | null>(null);
   const [pendingView, setPendingView] = useState<Study | null>(() => {
@@ -105,6 +117,7 @@ function AppContent() {
       setPending(null);
       setPendingView(id && !saved ? unknownPendingStudy(id) : null);
       setStudyDocument(saved ?? null);
+      setRetainedView(previous => previous?.study.id === id ? previous : null);
       setLoading(Boolean(id && !saved));
       setError(null);
       setRoute(next);
@@ -120,6 +133,7 @@ function AppContent() {
     const id = match[1];
     const memory = cache.current.get(id);
     if (memory?.SchemaVersion === 1 && cache.current.isFresh(memory) && loadRetry === 0) {
+      if (memory.Metadata.DataStage !== 'fundamentals') setRetainedView(null);
       setStudyDocument(memory); setPendingView(null); setLoading(false); return;
     }
     const controller = new AbortController();
@@ -137,7 +151,11 @@ function AppContent() {
       try {
         cached ??= await cache.current.restore(id);
         if (controller.signal.aborted) return;
-        if (cached) show(cached);
+        if (cached) {
+          const view = studyView(cached);
+          if (hasStudyData(view)) setRetainedView(retainedSnapshot(view, cached));
+          show(cached);
+        }
         let data: StudyDocument;
         if (cached?.Metadata.StaticSnapshot) data = await loadStaticStudy(id, controller.signal);
         else {
@@ -149,14 +167,17 @@ function AppContent() {
               { ticker: company.ticker, cik: company.cik, studyId: id }, controller.signal, show);
           } else data = await readStudyResponse(response);
         }
-        if (!controller.signal.aborted) { cache.current.set(data.Study.StudyID, data); show(data); }
+        if (!controller.signal.aborted) {
+          cache.current.set(data.Study.StudyID, data); show(data);
+          setRetainedView(previous => afterReady(previous, data));
+        }
       } catch (error) {
         if (controller.signal.aborted || isAbortError(error)) return;
         if (cached) { show(cached); return; } // Keep usable data through offline/provider failures.
         try {
           const data = await loadStaticStudy(id, controller.signal);
           if (controller.signal.aborted) return;
-          cache.current.set(data.Study.StudyID, data); show(data);
+          cache.current.set(data.Study.StudyID, data); show(data); setRetainedView(null);
         } catch (staticError) {
           if (!controller.signal.aborted && !isAbortError(staticError)) {
             setError(staticError instanceof Error ? staticError.message : 'Could not load the study.');
@@ -184,6 +205,7 @@ function AppContent() {
       if (controller.signal.aborted || readRoute() !== `/study/${studyId}`) return;
       cache.current.set(studyId, data);
       setStudyDocument(data);
+      setRetainedView(null);
       setDetailsStatus('idle');
     }).catch(error => {
       if (!controller.signal.aborted && !isAbortError(error)) setDetailsStatus('error');
@@ -211,6 +233,8 @@ function AppContent() {
     browserPreloads.current.set(key, entry);
     const publish = (document: StudyDocument) => {
       if (controller.signal.aborted || browserPreloads.current.get(key) !== entry) return;
+      if (entry.document && hasDocumentData(entry.document) && (!hasDocumentData(document)
+        || (entry.document.Metadata.DataStage !== 'fundamentals' && document.Metadata.DataStage === 'fundamentals'))) return;
       entry.document = document;
       startTransition(() => setPreparedPages(pages => pages.map(page => companyKey(page.company) === key ? previewView(entry, page) : page)));
     };
@@ -225,7 +249,7 @@ function AppContent() {
       });
       if (!response.ok) throw new Error('Preload busy');
       if (response.headers.get('content-type')?.includes('application/x-ndjson')) {
-        const document = await readStudyStream(response, document => { receivedLive = true; publish(document); }, readStudyResponse);
+        const document = await readStudyStream(response, publish, readStudyResponse);
         receivedLive = true; publish(document);
       }
       return !controller.signal.aborted;
@@ -247,7 +271,9 @@ function AppContent() {
     const cachedPreview = browserPreloads.current.get(companyKey(company));
     const page = prepared ?? pendingStudy(company, id);
     const recent = cache.current.findCompany(company);
-    const initial = retryId && pendingView?.id === retryId ? pendingView
+    const initialDocument = cachedPreview?.document && cachedPreview.expires > Date.now() ? cachedPreview.document : recent ?? studyDocument ?? undefined;
+    const initial = retryId && retainedView?.study.id === retryId ? retainedView.study
+      : retryId && pendingView?.id === retryId ? pendingView
       : cachedPreview?.document && cachedPreview.expires > Date.now() ? previewView(cachedPreview, page)
       : recent ? pageView(recent, page)
       : study && study.company.cik === company.cik ? { ...study, id } : pendingStudy(company, id);
@@ -255,6 +281,7 @@ function AppContent() {
     rememberStudyCompany(id, company);
     if (!retryId) setRestoredInputs(savedInputs ? { id, saved: savedInputs } : null);
     setPendingView(initial);
+    setRetainedView(previous => retryId && previous?.study.id === retryId ? previous : retainedSnapshot(initial, initialDocument));
     setPreparedPages([]);
     setStudyDocument(null);
     setPending(company);
@@ -265,7 +292,10 @@ function AppContent() {
     let receivedLive = false;
     if (!retryId && !cachedPreview?.document && !recent) {
       void cache.current.restoreCompany(company).then(document => {
-        if (document && !receivedLive && !controller.signal.aborted) setPendingView(pageView(document, page));
+        if (document && !receivedLive && !controller.signal.aborted) {
+          const view = pageView(document, page);
+          if (hasStudyData(view)) setRetainedView(retainedSnapshot(view, document));
+        }
       });
     }
     try {
@@ -273,7 +303,6 @@ function AppContent() {
       try {
         data = await postStudy('/api/studies?stage=fundamentals',
           { ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }, controller.signal, document => {
-          receivedLive = true;
           if (!controller.signal.aborted) setPendingView(studyView(document));
         });
       } catch (apiError) {
@@ -285,6 +314,7 @@ function AppContent() {
       cache.current.set(data.Study.StudyID, data);
       if (savedInputs) setRestoredInputs({ id: data.Study.StudyID, saved: savedInputs });
       setStudyDocument(data);
+      setRetainedView(previous => afterReady(previous, data));
       setPending(null);
       setPendingView(null);
       setRoute(`/study/${data.Study.StudyID}`);
@@ -304,13 +334,15 @@ function AppContent() {
     setLoading(false);
     setStudyDocument(null);
     setPendingView(null);
+    setRetainedView(null);
     setPreparedPages([]);
     setRoute('');
     window.location.hash = '';
   }
 
   if (route === '/login') return <LoginPage/>;
-  const displayedStudy = pendingView ?? study;
+  const liveStudy = pendingView ?? study;
+  const displayedStudy = retainedView?.study.id === liveStudy?.id ? retainedView?.study : liveStudy;
   const showingStudy = Boolean(displayedStudy && (pendingView || route));
   const pageStudies = showingStudy && displayedStudy ? [displayedStudy] : !route ? preparedPages : [];
   return <>

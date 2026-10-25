@@ -58,6 +58,13 @@ Failed revalidation retains cached data. Corrupt/expired entries and unavailable
 browser storage fall back to normal loading. Supabase inputs and sessions are
 not part of this cache.
 
+Populated cached views remain mounted while replacement data streams. Profile-only
+events cannot empty prepared pages. A full cached snapshot stays visible through
+Fundamentals readiness and daily/enrichment loading, then swaps to the completed
+response atomically. A Fundamentals-only preview is retained until the initial
+ready event. New studies without cached values still populate progressively;
+completed responses remain authoritative, including intentionally missing data.
+
 Entering home immediately queues every holding from the published snapshot index.
 Two low-priority CDN downloads run at a time, yielding to active search preloads;
 leaving home aborts active downloads and stops the remaining queue. Fresh disk

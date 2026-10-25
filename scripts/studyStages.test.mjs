@@ -30,10 +30,15 @@ test('Fundamentals mounts before completion; background retries and merges prese
     if (url === '/api/studies/preload/clear') return Promise.resolve(response({ cleared: 4 }));
     if (url === '/api/studies/preload') {
       assert.equal(options.headers.Accept, 'application/x-ndjson');
-      const preview = doc('00000000-0000-4000-8000-000000000999', 'fundamentals', 'Preloaded company');
+      const preview = doc('00000000-0000-4000-8000-000000000999', 'complete', 'Preloaded company');
       preview.AnnualData = [{ FiscalYear: 2025, AsOfDataDate: '2025-12-31', Sales: 123, EPS: 2, PTP: 20, PtpOnSales: 0.16, EPSSplitFactor: 1, Sources: { Sales: null, EPS: null, PTP: null } }];
       return Promise.resolve({ ok: true, headers: { get: () => 'application/x-ndjson' }, body: new ReadableStream({ start(controller) {
-        controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: 'ready', document: preview }) + '\n')); controller.close();
+        for (const event of [
+          { type: 'progress', document: preview },
+          { type: 'progress', document: doc(preview.Study.StudyID, 'fundamentals', 'Profile only') },
+          { type: 'ready', document: { ...preview, AnnualData: [{ ...preview.AnnualData[0], Sales: 456 }], Metadata: { ...preview.Metadata, DataStage: 'fundamentals' } } },
+        ]) controller.enqueue(new TextEncoder().encode(JSON.stringify(event) + '\n'));
+        controller.close();
       } }) });
     }
     if (url === '/api/studies?stage=fundamentals') {
@@ -120,7 +125,8 @@ test('Fundamentals mounts before completion; background retries and merges prese
       send({ type: 'progress', document: doc(firstId, 'fundamentals', 'Partial company') });
       await settle();
     });
-    assert.equal(document.querySelector('h1').textContent, 'Partial company');
+    assert.equal(document.querySelector('h1').textContent, 'Preloaded company');
+    assert.equal(preparedPage.querySelector('[data-sales]').textContent, '123000000', 'Profile-only progress must not empty the populated page');
     assert.equal(document.querySelector('[data-primary]').textContent, 'loading');
     assert.equal(document.querySelector('input'), input);
     assert.equal(input.value, 'my forecast');
@@ -133,17 +139,20 @@ test('Fundamentals mounts before completion; background retries and merges prese
     // Hash navigation completes on a separate event-loop turn.
     await React.act(async () => { await settle(); });
     assert.equal(completions.length, 1);
+    assert.equal(preparedPage.querySelector('[data-sales]').textContent, '123000000', 'Keep populated data through ready/hash navigation and daily enrichment');
     assert.equal(document.querySelector('[data-status]').textContent, 'loading');
     assert.equal(document.querySelector('input'), input, 'Initial data must fill the mounted page without replacing it');
     assert.equal(input.value, 'my forecast');
     assert.equal(document.querySelector('[data-primary]').textContent, 'idle');
     await React.act(async () => { completions[0].resolve(response({ error: 'Temporary error' }, false)); await settle(); });
     assert.equal(document.querySelector('[data-status]').textContent, 'error');
+    assert.equal(preparedPage.querySelector('[data-sales]').textContent, '123000000', 'A failed background request keeps the existing snapshot');
     assert.equal(document.querySelector('input').value, 'my forecast');
     await click('Retry details');
     assert.equal(completions.length, 2);
     await React.act(async () => { completions[1].resolve(response(doc(firstId, 'complete', 'Enriched company'))); await settle(); });
     assert.equal(document.querySelector('h1').textContent, 'Enriched company');
+    assert.equal(preparedPage.querySelector('[data-sales]').textContent, '', 'The completed response is authoritative, including missing values');
     assert.equal(document.querySelector('input').value, 'my forecast');
     assert.equal(document.querySelector('[data-status]').textContent, 'idle');
     await click('Back');
