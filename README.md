@@ -39,6 +39,12 @@ session restoration, and logout. Set `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local` (see `.env.example`). Apply
 `supabase/migrations/202610240001_user_studies.sql` in your project's SQL Editor.
 
+GitHub Pages builds use the connected project's public URL and publishable key
+by default. To override them, set the same `VITE_SUPABASE_*` names in GitHub
+Actions repository variables or secrets, then redeploy. Render environment
+settings do not configure the separately built Pages frontend. Never use a
+service-role or secret Supabase key in the frontend.
+
 Apply the remaining migrations in order: `202610240002_study_made_at.sql` and
 `202610240003_public_study_reads.sql`.
 Use **Save study** on a company page to store your forecasts, valuation overrides,

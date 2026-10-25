@@ -47,9 +47,10 @@ jobs:
         env:
           VITE_STUDY_API_URL: ${{ vars.VITE_STUDY_API_URL || vars.VITE_API_BASE_URL || 'https://fig-dashboard.onrender.com' }}
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          # These are public browser credentials, never a service-role key.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || secrets.VITE_SUPABASE_URL || 'https://juxbbrfpridbifpfymlm.supabase.co' }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY || secrets.VITE_SUPABASE_PUBLISHABLE_KEY || vars.VITE_SUPABASE_ANON_KEY || secrets.VITE_SUPABASE_ANON_KEY || 'sb_publishable_J53BuJlD682uEpb6EFuXdg_dCqPFr3s' }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY || secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
