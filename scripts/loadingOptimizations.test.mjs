@@ -48,8 +48,10 @@ test('busy preloads retry and a changed query reuses its in-flight request witho
     await type('app');
     assert.equal(requests.length, 1);
     assert.deepEqual(prepared.at(-1), ['AAPL'], 'The first page prepares immediately without a typing delay');
+    const firstPreparationCount = prepared.length;
     await type('aapl');
     assert.equal(requests.length, 1, 'The changed query must share a still-running request for the same company');
+    assert.equal(prepared.length, firstPreparationCount, 'Typing with the same best match must not restart page preparation');
     await React.act(async () => { rejectBusy(false); await delay(230); });
     // Let the rejection callback schedule its retry before advancing another turn.
     await React.act(async () => { await delay(230); });
@@ -65,11 +67,14 @@ test('busy preloads retry and a changed query reuses its in-flight request witho
     await React.act(async () => { finishMount(); });
     await React.act(async () => { await delay(250); });
     assert.deepEqual(prepared.at(-1), ['TEST0'], 'Secondary pages wait 500ms after the first mount');
+    await type('tes');
     await React.act(async () => { await delay(300); });
     assert.deepEqual(prepared.at(-1), ['TEST0', 'TEST1', 'TEST2', 'TEST3', 'TEST4']);
     await React.act(async () => { finishData(true); });
     assert.equal(requests.filter(request => request.ticker.startsWith('TEST')).length, 1);
-    await React.act(async () => { await delay(550); });
+    await React.act(async () => { await delay(250); });
+    await type('test');
+    await React.act(async () => { await delay(300); });
     assert.deepEqual(requests.filter(request => request.ticker.startsWith('TEST')).map(request => request.ticker), ['TEST0', 'TEST1', 'TEST2', 'TEST3', 'TEST4']);
     await type('te');
     const count = requests.length;

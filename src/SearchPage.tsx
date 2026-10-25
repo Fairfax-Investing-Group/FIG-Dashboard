@@ -55,20 +55,23 @@ export default function SearchPage({ onSelect, onPreload, onPreparePages }: { on
       .filter(company => `${company.ticker} ${company.name}`.toLowerCase().includes(search))
       .sort((a, b) => rank(a) - rank(b) || a.ticker.localeCompare(b.ticker)).slice(0, 10);
   }, [companies, search]);
+  const bestMatch = searchOpen ? matches[0] : undefined;
+  const latestMatches = useRef(matches);
+  latestMatches.current = matches;
 
   useEffect(() => {
-    if (!searchOpen || !search || !matches.length) { void onPreparePages?.([]); return; }
+    if (!bestMatch) { void onPreparePages?.([]); return; }
     let cancelled = false;
     let remainingTimer: ReturnType<typeof setTimeout> | undefined;
-    Promise.resolve(onPreparePages?.(matches.slice(0, 1))).then(() => {
+    Promise.resolve(onPreparePages?.([bestMatch])).then(() => {
       if (cancelled) return;
-      remainingTimer = setTimeout(() => { void onPreparePages?.(matches.slice(0, 5)); }, 500);
+      remainingTimer = setTimeout(() => { void onPreparePages?.(latestMatches.current.slice(0, 5)); }, 500);
     }).catch(() => { /* Page warming must never interrupt search. */ });
     return () => { cancelled = true; clearTimeout(remainingTimer); };
-  }, [query, matches, searchOpen, onPreparePages]);
+  }, [bestMatch, onPreparePages]);
 
   useEffect(() => {
-    if (!searchOpen || !search || !onPreload || !matches.length) return;
+    if (!bestMatch || !onPreload) return;
     let cancelled = false;
     const preload = (company: Company, priority: number, attempt = 0, onReady?: () => void) => {
       if (cancelled) return;
@@ -97,11 +100,11 @@ export default function SearchPage({ onSelect, onPreload, onPreparePages }: { on
     };
     // The stream resolves only when the closest match's data is ready. Do not
     // let speculative secondary downloads compete with that first response.
-    preload(matches[0], 0, 0, () => {
-      preloadTimers.current.push(setTimeout(() => matches.slice(1, 5).forEach((company, index) => preload(company, index + 1)), 500));
+    preload(bestMatch, 0, 0, () => {
+      preloadTimers.current.push(setTimeout(() => latestMatches.current.slice(1, 5).forEach((company, index) => preload(company, index + 1)), 500));
     });
     return () => { cancelled = true; cancelPreload(); };
-  }, [query, matches, searchOpen, onPreload]);
+  }, [bestMatch, onPreload]);
 
   return (
     <main className="home-page">
