@@ -29,7 +29,8 @@ _ERROR = None
 _RETRY_AT = None
 _RUNNING = False
 INDEX_SYMBOLS = {'NASDAQ': '^IXIC', 'S&P 500': '^GSPC', 'DOW JONES': '^DJI', 'RUSSEL 2000': '^RUT'}
-BETA_METHOD = '1y-daily-adjusted-sp500-v1'
+BETA_METHOD = '1y-daily-adjusted-sp500-v2'
+CLASSIFICATION_VERSION = 3
 
 
 def cache_path():
@@ -112,8 +113,9 @@ def fetch_history(symbol, start, session):
     return records
 
 
-def stock_beta(history, benchmark, session):
-    """Trailing-year beta from matched adjusted closing returns; require 60 observations."""
+def stock_risk_metrics(history, benchmark, session):
+    """Trailing-year beta, annualized alpha, and volatility from matched adjusted returns."""
+    unavailable = {'beta': None, 'alpha': None, 'standardDeviation': None}
     cutoff = (datetime.fromisoformat(session) - timedelta(days=365)).date().isoformat()
     def prices(records):
         return {point['date']: point['adjustedClose'] for point in records
@@ -122,16 +124,29 @@ def stock_beta(history, benchmark, session):
     stock, market = prices(history), prices(benchmark)
     dates = sorted(stock.keys() & market.keys())
     if len(dates) < 61:
-        return None
+        return unavailable
     stock_returns = [stock[day] / stock[previous] - 1 for previous, day in zip(dates, dates[1:])]
     market_returns = [market[day] / market[previous] - 1 for previous, day in zip(dates, dates[1:])]
     stock_mean = sum(stock_returns) / len(stock_returns)
     market_mean = sum(market_returns) / len(market_returns)
     variance = sum((value - market_mean) ** 2 for value in market_returns)
+    stock_variance = sum((value - stock_mean) ** 2 for value in stock_returns) / (len(stock_returns) - 1)
+    standard_deviation = math.sqrt(stock_variance * 252) if stock_variance >= 0 else None
+    result = {**unavailable, 'standardDeviation': standard_deviation if standard_deviation is not None and math.isfinite(standard_deviation) else None}
     if variance <= 1e-20:
-        return None
+        return result
     beta = sum((stock - stock_mean) * (market - market_mean) for stock, market in zip(stock_returns, market_returns)) / variance
-    return beta if math.isfinite(beta) else None
+    if math.isfinite(beta):
+        result['beta'] = beta
+        # Jensen alpha annualized from the daily regression intercept, assuming a 0% risk-free rate.
+        alpha = (stock_mean - beta * market_mean) * 252
+        result['alpha'] = alpha if math.isfinite(alpha) else None
+    return result
+
+
+def stock_beta(history, benchmark, session):
+    """Compatibility helper for callers that need only trailing-year beta."""
+    return stock_risk_metrics(history, benchmark, session)['beta']
 
 
 def fetch_classification(symbol):
@@ -139,8 +154,20 @@ def fetch_classification(symbol):
     try:
         profile = get_profile(symbol)
         cap = profile.get('marketCap')
+        trailing_pe = profile.get('trailingPE')
+        forward_pe = profile.get('forwardPE')
+        free_cash_flow = profile.get('freeCashflow')
+        peg_ratio = profile.get('trailingPegRatio')
+        if peg_ratio is None:
+            peg_ratio = profile.get('pegRatio')
+        valid_cap = cap if isinstance(cap, (int, float)) and math.isfinite(cap) and cap > 0 else None
+        valid_free_cash_flow = free_cash_flow if isinstance(free_cash_flow, (int, float)) and math.isfinite(free_cash_flow) else None
         return {'sector': profile.get('sector') or None,
-                'marketCap': cap if isinstance(cap, (int, float)) and math.isfinite(cap) and cap > 0 else None}
+                'marketCap': valid_cap,
+                'trailingPE': trailing_pe if isinstance(trailing_pe, (int, float)) and math.isfinite(trailing_pe) and trailing_pe > 0 else None,
+                'forwardPE': forward_pe if isinstance(forward_pe, (int, float)) and math.isfinite(forward_pe) and forward_pe > 0 else None,
+                'pegRatio': peg_ratio if isinstance(peg_ratio, (int, float)) and math.isfinite(peg_ratio) else None,
+                'freeCashFlowYield': valid_free_cash_flow / valid_cap if valid_free_cash_flow is not None and valid_cap is not None else None}
     except Exception:
         logging.warning('Portfolio classification unavailable for %s', symbol)
         return {}
@@ -173,7 +200,7 @@ def calculate_portfolio(seed, histories, session):
         holding['high52'] = max(point['high'] for point in annual if point['high'] is not None)
         holding['low52'] = min(point['low'] for point in annual if point['low'] is not None)
         holding['history'] = spark(symbol)
-        holding['beta'] = stock_beta(history, histories['^GSPC'], session)
+        holding.update(stock_risk_metrics(history, histories['^GSPC'], session))
     summary = result['summary']
     summary['totalCost'] = sum(item['cost'] for item in result['holdings'])
     summary['holdingsValue'] = sum(item['marketValue'] for item in result['holdings'])
@@ -233,7 +260,7 @@ def refresh_if_due(now=None):
     if not session or session < seed['asOf']:
         return False
     cached = read_cache(fingerprint)
-    if cached and cached['asOf'] >= session and cached.get('betaMethod') == BETA_METHOD and cached.get('classificationVersion') == 1:
+    if cached and cached['asOf'] >= session and cached.get('betaMethod') == BETA_METHOD and cached.get('classificationVersion') == CLASSIFICATION_VERSION:
         return False
     if _RETRY_AT and now < _RETRY_AT:
         return False
@@ -253,9 +280,10 @@ def refresh_if_due(now=None):
         previous = {item['ticker']: item for item in (cached or seed)['holdings']}
         for holding in document['holdings']:
             profile = classifications[holding['ticker']]
-            for key in ('sector', 'marketCap'):
-                holding[key] = profile.get(key) or previous.get(holding['ticker'], {}).get(key)
-        document['classificationVersion'] = 1
+            for key in ('sector', 'marketCap', 'trailingPE', 'forwardPE', 'pegRatio', 'freeCashFlowYield'):
+                value = profile.get(key)
+                holding[key] = value if value is not None else previous.get(holding['ticker'], {}).get(key)
+        document['classificationVersion'] = CLASSIFICATION_VERSION
         document['seedFingerprint'] = fingerprint
         document['lastSuccessfulAt'] = datetime.now(timezone.utc).isoformat()
         path = cache_path()

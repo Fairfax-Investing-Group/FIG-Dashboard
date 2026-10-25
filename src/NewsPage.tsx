@@ -1,5 +1,5 @@
-import { apiUrl } from './apiUrl';
 import { useEffect, useRef, useState } from 'react';
+import { apiUrl } from './lib/api';
 
 type Article = { id: string; title: string; url: string; publisher: string; publishedAt: string; summary: string; thumbnail?: string | null };
 type NewsFeed = { articles: Article[]; retrievedAt: string; nextCount: number | null };

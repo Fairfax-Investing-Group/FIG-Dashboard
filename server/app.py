@@ -24,7 +24,8 @@ COMPLETION_SLOTS = threading.BoundedSemaphore(2)
 def allowed_origin(origin):
     if not origin:
         return False
-    allowed = {value.strip().rstrip('/') for value in os.environ.get('STUDY_ALLOWED_ORIGINS', '').split(',') if value.strip()}
+    configured = os.environ.get('STUDY_ALLOWED_ORIGINS') or os.environ.get('CORS_ORIGINS') or 'https://research.fairfaxinvestinggroup.com'
+    allowed = {value.strip().rstrip('/') for value in configured.split(',') if value.strip()}
     return origin in allowed
 
 
@@ -239,7 +240,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT') or os.environ.get('API_PORT', '8000'))
-    host = os.environ.get('API_HOST', '127.0.0.1')
+    host = os.environ.get('API_HOST') or os.environ.get('HOST', '127.0.0.1')
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     portfolio_scheduler = start_portfolio_scheduler()

@@ -112,6 +112,11 @@ on early-close days), skips exchange holidays/weekends, and catches up on startu
 Keep the server running for scheduled updates; an open browser is not required.
 The homepage checks the stored result every minute while visible.
 
+The GitHub Pages deployment is static and cannot run the Python API. Its build
+publishes `public/portfolio-current.json` as a snapshot fallback, refreshed by
+the Pages workflow on weekdays after market close. The dashboard tries the API
+first, then this snapshot, so deployed holdings and risk data remain visible.
+
 Workbook transactions and cash remain in `src/data/portfolio.json`. Yahoo Finance
 regular-session closing prices update holdings, partner pitch records, market
 pulse, indexes, 52-week ranges, returns, and history. Cost bases and purchase dates

@@ -245,6 +245,7 @@ footer a:hover { text-decoration: underline; }
 @media(max-width:640px) { .fundamentals-title h2 { font-size:14px; } .fundamentals-title>span { display:none; } .fundamentals .financial-table-scroll tbody th { min-width:166px; } }
 
 .study-header-actions { display:flex; align-items:center; gap:10px; }
+.snapshot-note { color:var(--muted, #64748b); font-size:11px; white-space:nowrap; }
 .export-button { display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--ui-border); border-radius:7px; padding:11px 14px; background:white; color:var(--navy-soft); font-size:12px; text-decoration:none; white-space:nowrap; }
 .export-button:hover { background:var(--ui-hover); border-color:#a9b8ca; }
 @media(max-width:800px) { .study-header-actions { flex-wrap:wrap; justify-content:flex-end; } .export-button { padding:9px 11px; font-size:11px; } }
@@ -624,7 +625,7 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-summary-item:last-child { border:0; }
 .portfolio-summary-item>span { color:#6e7d8e; font-size:9px; line-height:1.5; }
 .portfolio-summary-item>strong { font-size:17px; color:var(--navy-strong); font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.4px; white-space:nowrap; }
-.portfolio-summary-item:first-child { background:#e8edf3; }
+.portfolio-summary-item:first-child { background:#fff; }
 .portfolio-positive,.portfolio-summary-item>.portfolio-positive { color:#287b53; }
 .portfolio-negative,.portfolio-summary-item>.portfolio-negative { color:#b54850; }
 .portfolio-charts { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; margin-bottom:10px; }
@@ -634,6 +635,16 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-panel-heading>span { color:#c1cedd; font-size:9px; }
 .portfolio-panel-heading>button { border:0; padding:0; background:transparent; color:#d5dfeb; font-size:10px; }
 .portfolio-chart { width:100%; height:205px; padding:6px 8px 2px; }
+.portfolio-chart { position:relative; }
+.portfolio-event-marker { cursor:help; outline:none; }
+.portfolio-event-marker circle { r:9px; fill:#eef2f5; stroke:#91a0b2; stroke-width:1; }
+.portfolio-event-marker text { fill:#61758c; font-size:9px; font-weight:700; pointer-events:none; }
+.portfolio-event-marker:hover circle,.portfolio-event-marker:focus circle { fill:#dbe4ec; stroke:#61758c; stroke-width:1.5; }
+.portfolio-event-card { position:absolute; z-index:4; right:12px; bottom:8px; display:grid; gap:3px; width:min(240px,calc(100% - 24px)); padding:7px 25px 7px 9px; border:1px solid #d7dfe7; border-radius:5px; background:rgba(255,255,255,.97); box-shadow:0 3px 12px #24344918; color:#344352; font-size:9px; line-height:1.4; }
+.portfolio-event-card strong { color:#283f56; font-size:9px; }
+.portfolio-event-card small { color:#61758c; font-size:8px; }
+.portfolio-event-close { position:absolute; top:3px; right:5px; width:17px; height:17px; padding:0; border:0; border-radius:3px; background:transparent; color:#61758c; font-size:15px; line-height:1; cursor:pointer; }
+.portfolio-event-close:hover,.portfolio-event-close:focus-visible { background:#eef2f5; color:#283f56; }
 .portfolio-period { display:flex; gap:3px; }
 .portfolio-period button { border:1px solid transparent; border-radius:3px; padding:3px 6px; background:transparent; color:#c1cedd; font-size:9px; }
 .portfolio-period button[aria-pressed=true] { border-color:#8a9eb7; color:white; background:#ffffff15; }
@@ -671,7 +682,7 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-source { margin:8px 0 9px; color:#8b97a5; font-size:9px; line-height:1.7; }
 .home-footer { margin-top:0; }
 @media(min-width:1600px) { .portfolio-dashboard { padding-inline:32px; } .portfolio-chart { height:220px; } .portfolio-table { font-size:10px; } .portfolio-table .portfolio-company-name { font-size:10px; max-width:225px; } }
-@media(max-width:1200px) { .portfolio-summary { grid-template-columns:repeat(4,minmax(0,1fr)); } .portfolio-summary-item:nth-child(4) { border-right:0; } .portfolio-summary-item:nth-child(-n+4) { border-bottom:1px solid var(--ui-border); } .portfolio-bottom-grid { grid-template-columns:1fr 1fr; } .portfolio-holdings .portfolio-table { min-width:1300px; } }
+@media(max-width:1200px) { .portfolio-summary { grid-template-columns:repeat(4,minmax(0,1fr)); } .portfolio-summary-item:nth-child(4) { border-right:0; } .portfolio-summary-item:nth-child(-n+4) { border-bottom:1px solid var(--ui-border); } .portfolio-bottom-grid { grid-template-columns:1fr 1fr; } }
 @media(max-width:800px) { .portfolio-dashboard { padding:10px 16px 0; } .portfolio-summary-item>strong { font-size:16px; } .portfolio-chart { height:190px; } .portfolio-heading h2 { font-size:20px; } }
 @media(max-width:600px) { .portfolio-charts,.portfolio-bottom-grid { grid-template-columns:minmax(0,1fr); } .portfolio-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .portfolio-summary-item:nth-child(even) { border-right:0; } .portfolio-summary-item:nth-child(-n+6) { border-bottom:1px solid var(--ui-border); } .portfolio-heading { align-items:flex-start; gap:10px; } .portfolio-identity img { width:48px; height:36px; } .portfolio-identity .home-eyebrow { display:none; } .portfolio-heading h2 { font-size:17px; } .portfolio-asof { max-width:125px; font-size:8px; text-align:right; line-height:1.6; } .portfolio-dashboard { padding-inline:14px; } }
 @media(min-width:801px) and (max-height:700px) { .home-topbar { padding-block:5px; } .home-account { gap:5px; } .home-brand-mark { font-size:24px; } .home-login { padding-block:5px; } .home-methodology h1 { font-size:17px; margin-bottom:4px; } .home-methodology p { font-size:10px; } .home-methodology-steps { margin-top:4px; font-size:8px; } .home-company-search h2 { font-size:14px; margin-bottom:6px; } .home-company-search .search-field input { padding-block:9px; } }
@@ -767,8 +778,38 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .home-methodology ol { flex-shrink:0; margin-block:auto; }
 
 .portfolio-holdings .portfolio-company-name { max-width:none; }
-.portfolio-holdings .portfolio-history-cell { width:140px; min-width:140px; }
-.portfolio-holdings .portfolio-history-cell .portfolio-sparkline { width:140px; margin:0; }
+.portfolio-holdings .portfolio-table-scroll { overflow-x:visible; }
+.portfolio-holdings .portfolio-table { table-layout:fixed; min-width:0; font-size:8px; white-space:normal; }
+.portfolio-holdings .portfolio-table td { overflow-wrap:anywhere; }
+.portfolio-holdings .portfolio-table tr>:nth-child(1) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(2) { width:9%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(3) { width:5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(4) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(5) { width:4.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(6) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(7) { width:4.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(8) { width:5.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(9) { width:4.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(10) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(11) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(12) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(13) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(14) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(15) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(16) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(17) { width:4.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(18) { width:3.5%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(19) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(20) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(21) { width:4%; }
+.portfolio-holdings .portfolio-table tr>:nth-child(22) { width:9%; }
+.portfolio-holdings .portfolio-table th,.portfolio-holdings .portfolio-table td { padding:3px 2px; }
+.portfolio-holdings .portfolio-company-name { white-space:normal; overflow-wrap:anywhere; }
+.portfolio-holdings .portfolio-purchase-date { min-width:0; }
+.portfolio-holdings .portfolio-ticker { font-size:8px; }
+.portfolio-holdings .portfolio-history-cell { width:100%; min-width:0; }
+.portfolio-holdings .portfolio-history-cell .portfolio-sparkline { width:100%; max-width:100%; margin:0; }
+@media(max-width:800px) { .portfolio-holdings .portfolio-table { font-size:6.5px; } .portfolio-holdings .portfolio-table th,.portfolio-holdings .portfolio-table td { padding:2px 1px; } }
 @media(max-width:1200px) { .portfolio-summary { grid-template-columns:repeat(5,minmax(0,1fr)); } .portfolio-summary-item { border-right:1px solid var(--ui-border); border-bottom:1px solid var(--ui-border); } .portfolio-summary-item:nth-child(4) { border-right:1px solid var(--ui-border); } .portfolio-summary-item:nth-child(5n) { border-right:0; } .portfolio-summary-item:nth-last-child(-n+5) { border-bottom:0; } }
 @media(max-width:600px) { .portfolio-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .portfolio-summary-item:nth-child(n) { border-right:1px solid var(--ui-border); border-bottom:1px solid var(--ui-border); } .portfolio-summary-item:nth-child(even) { border-right:0; } .portfolio-summary-item:last-child { grid-column:auto; border:0; } }
 
@@ -833,7 +874,7 @@ h1, .company-ticker, .regular-market-quote>strong, .company-statistics dd { colo
 .portfolio-top-summary .portfolio-summary { grid-template-columns:repeat(8,minmax(0,1fr)); margin-bottom:0; }
 .portfolio-top-summary .portfolio-summary-item { justify-content:center; padding:9px 8px; border-bottom:0; border-right:1px solid var(--ui-border); }
 .portfolio-top-summary .portfolio-summary-item:last-child { border:0; }
-.portfolio-risk-box { padding:7px 10px; border:1px solid #ccd8e4; border-radius:6px; background:#f4f7fb; min-width:0; }
+.portfolio-risk-box { padding:7px 10px; border:1px solid #ccd8e4; border-radius:6px; background:#fff; min-width:0; }
 .portfolio-risk-heading { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; }
 .portfolio-risk-heading h3 { margin:0; font-size:9px; font-weight:600; color:#234d76; }
 .portfolio-risk-heading span { font-size:7px; color:#7b8b9c; white-space:nowrap; }

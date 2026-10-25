@@ -1,4 +1,3 @@
-import { apiUrl } from './apiUrl';
 import { AuthProvider } from './auth/AuthProvider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
@@ -10,6 +9,8 @@ import type { SavedStudy } from './lib/studyInputs';
 import { StudyCache } from './studyCache';
 import { readStudyStream } from './studyStream';
 import { studyView } from './studyDocument';
+import { apiUrl } from './lib/api';
+import { loadStaticStudy } from './lib/staticStudy';
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
 
@@ -103,7 +104,20 @@ function AppContent() {
     fetch(apiUrl(`/api/studies/${match[1]}?view=study`), { signal: controller.signal })
       .then(readResponse)
       .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyView(data).company); setStudyDocument(data); setPendingView(null); })
-      .catch(error => { if (!controller.signal.aborted && error.name !== 'AbortError') setError(error.message); })
+      .catch(async error => {
+        if (controller.signal.aborted || error.name === 'AbortError') return;
+        try {
+          const data = await loadStaticStudy(match[1], controller.signal);
+          if (controller.signal.aborted) return;
+          cache.current.set(data.Study.StudyID, data);
+          rememberStudyCompany(data.Study.StudyID, studyView(data).company);
+          setStudyDocument(data);
+          setPendingView(null);
+        } catch (staticError) {
+          if (controller.signal.aborted || (staticError instanceof Error && staticError.name === 'AbortError')) return;
+          setError(staticError instanceof Error ? staticError.message : error.message);
+        }
+      })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [route, loadRetry]);
@@ -163,16 +177,23 @@ function AppContent() {
     setError(null);
     setLoading(true);
     try {
-      const data = await fetch(apiUrl('/api/studies?stage=fundamentals'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-        body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }),
-        signal: controller.signal,
-      }).then(response => readStudyStream(response, document => {
-        if (!controller.signal.aborted) setPendingView(studyView(document));
-      }, readResponse));
+      let data: StudyDocument;
+      try {
+        data = await fetch(apiUrl('/api/studies?stage=fundamentals'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+          body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }),
+          signal: controller.signal,
+        }).then(response => readStudyStream(response, document => {
+          if (!controller.signal.aborted) setPendingView(studyView(document));
+        }, readResponse));
+      } catch (apiError) {
+        if (controller.signal.aborted || (apiError instanceof Error && apiError.name === 'AbortError')) throw apiError;
+        data = await loadStaticStudy(company.ticker, controller.signal);
+      }
       if (controller.signal.aborted) return;
       cache.current.set(data.Study.StudyID, data);
+      if (savedInputs) setRestoredInputs({ id: data.Study.StudyID, saved: savedInputs });
       setStudyDocument(data);
       setPending(null);
       setPendingView(null);
@@ -205,6 +226,7 @@ function AppContent() {
   {pageStudies.map(pageStudy => <div key={pageStudy.id} hidden={!showingStudy} inert={!showingStudy}>
   <StudyPage
     study={pageStudy} active={showingStudy} initialSavedStudy={restoredInputs?.id === pageStudy.id ? restoredInputs.saved : undefined} onBack={backToSearch}
+    staticSnapshot={studyDocument?.Metadata.StaticSnapshot}
     onRefresh={saved => createStudy(pageStudy.company, undefined, saved)} onFundamentalsReady={showingStudy ? fundamentalsReady : undefined}
     fundamentalsStatus={!showingStudy || pendingView ? error ? 'error' : 'loading' : 'idle'}
     fundamentalsError={error}

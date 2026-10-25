@@ -37,7 +37,8 @@ Variables** and create:
 VITE_STUDY_API_URL=https://YOUR-SERVICE.onrender.com
 ```
 
-Use the origin only, without `/api`. The Pages workflow now passes this variable
+Use the origin only, without `/api`. `VITE_API_BASE_URL` is also supported for
+existing deployments; `VITE_STUDY_API_URL` takes priority when both are set. The Pages workflow now passes this variable
 to the Vite build. Keep the existing Supabase variables configured. Push these
 changes and rerun **Deploy GitHub Pages** so the new origin is included in the
 built JavaScript; changing a GitHub variable alone does not rebuild the site.
@@ -47,7 +48,9 @@ portfolio requests, and exports to the API. Company search and Supabase requests
 keep their existing locations. In local `.env.local`, leave
 `VITE_STUDY_API_URL` empty to use Vite's normal `/api` proxy.
 
-CORS allows the exact origins in `STUDY_ALLOWED_ORIGINS` (comma separated, no
+`CORS_ORIGINS` is a compatibility alias for `STUDY_ALLOWED_ORIGINS`;
+`STUDY_ALLOWED_ORIGINS` takes priority. The production frontend domain is allowed
+by default when neither is configured. CORS allows the exact origins in `STUDY_ALLOWED_ORIGINS` (comma separated, no
 wildcards). Include any additional frontend domains you actually serve. This
 also covers preflight requests and streamed Fundamentals/background responses.
 
