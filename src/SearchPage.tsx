@@ -60,21 +60,20 @@ export default function SearchPage({ onSelect, onPreload, onPreparePages }: { on
     if (!searchOpen || !search || !matches.length) { void onPreparePages?.([]); return; }
     let cancelled = false;
     let remainingTimer: ReturnType<typeof setTimeout> | undefined;
-    const firstTimer = setTimeout(() => {
-      Promise.resolve(onPreparePages?.(matches.slice(0, 1))).then(() => {
-        if (cancelled) return;
-        remainingTimer = setTimeout(() => { void onPreparePages?.(matches.slice(0, 5)); }, 500);
-      }).catch(() => { /* Page warming must never interrupt search. */ });
-    }, 25);
-    return () => { cancelled = true; clearTimeout(firstTimer); clearTimeout(remainingTimer); };
+    Promise.resolve(onPreparePages?.(matches.slice(0, 1))).then(() => {
+      if (cancelled) return;
+      remainingTimer = setTimeout(() => { void onPreparePages?.(matches.slice(0, 5)); }, 500);
+    }).catch(() => { /* Page warming must never interrupt search. */ });
+    return () => { cancelled = true; clearTimeout(remainingTimer); };
   }, [query, matches, searchOpen, onPreparePages]);
 
   useEffect(() => {
     if (!searchOpen || !search || !onPreload || !matches.length) return;
     let cancelled = false;
-    const preload = (company: Company, priority: number, attempt = 0) => {
+    const preload = (company: Company, priority: number, attempt = 0, onReady?: () => void) => {
+      if (cancelled) return;
       const key = `${company.cik}:${company.ticker}`;
-      if (Date.now() - (preloaded.current.get(key) ?? 0) < 60_000) return;
+      if (Date.now() - (preloaded.current.get(key) ?? 0) < 60_000) { onReady?.(); return; }
       let request = preloading.current.get(key);
       if (!request) {
         request = Promise.resolve().then(() => onPreload(company, priority)).then(result => result !== false, () => false);
@@ -89,13 +88,18 @@ export default function SearchPage({ onSelect, onPreload, onPreparePages }: { on
         });
       }
       request.then(accepted => {
-        if (!accepted && !cancelled && attempt < (priority === 0 ? 10 : 3)) {
-          preloadTimers.current.push(setTimeout(() => preload(company, priority, attempt + 1), 200));
+        if (cancelled) return;
+        if (accepted) onReady?.();
+        else if (attempt < (priority === 0 ? 10 : 3)) {
+          preloadTimers.current.push(setTimeout(() => preload(company, priority, attempt + 1, onReady), 200));
         }
       });
     };
-    preload(matches[0], 0);
-    preloadTimers.current = [setTimeout(() => matches.slice(1, 5).forEach((company, index) => preload(company, index + 1)), 500)];
+    // The stream resolves only when the closest match's data is ready. Do not
+    // let speculative secondary downloads compete with that first response.
+    preload(matches[0], 0, 0, () => {
+      preloadTimers.current.push(setTimeout(() => matches.slice(1, 5).forEach((company, index) => preload(company, index + 1)), 500));
+    });
     return () => { cancelled = true; cancelPreload(); };
   }, [query, matches, searchOpen, onPreload]);
 
