@@ -49,6 +49,28 @@ not performed.
 
 ## Measurements
 
+The October 24 code reuse pass additionally:
+
+- Shares bounded Intl formatter caches across study tables, valuation, portfolio
+  tables, chart labels, and tooltips, retaining the original locale/options.
+- Prepares TTM financial values once for chart and current valuation. Memoizes
+  chart inputs, regressions, layout transforms, and tooltip metadata separately
+  from line visibility/drag offsets. Reuses valuation rows/averages on edits and
+  skips financial-table work when only a live quote changes.
+- Shares study POST/stream validation, identity extraction, and browser/server
+  preload cleanup. Identity lookup no longer converts an entire study document.
+- Indexes annual SEC candidates by end date and parses repeated dates once,
+  retaining concept precedence, restatement ordering, and stable tie handling.
+
+Local synthetic comparisons measured 10,000 formatted number cells at 246 ms
+before versus 10 ms after; a 3,900-fact annual normalization fixture averaged
+126 ms before versus 58 ms after over 20 runs. Old/new normalization outputs
+matched across 20 shuffled fixture orders. These CPU measurements are not
+end-to-end loading or browser paint timings and vary with machine/load.
+The full suite passed (120 Python and 65 JavaScript tests), followed by targeted
+checks for the final chart/formatter changes and a successful production build.
+CSS and rendered markup were preserved; no browser UI verification was performed.
+
 Local backend measurements used AAPL, MSFT, and NVDA with peers disabled on both
 runs. Times include live providers, vary between requests, and are not browser
 paint measurements. These are small samples, not latency guarantees.

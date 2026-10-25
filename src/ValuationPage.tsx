@@ -1,5 +1,6 @@
+import { formatNumber } from './lib/format';
 import { ExclusionYear, ExclusionValue, ExclusionHelp, isValueExcluded, type TableExclusions } from './ExclusionControls';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { AnnualRow, MarketQuote, Study } from './types';
 import { currentValuation, valuationAverage, valuationRows, type ValuationRow } from './valuationMath';
 import RiskReward from './RiskReward';
@@ -15,21 +16,22 @@ const valueColumns = [
   { key: 'highYield', metric: 'highYield', name: 'High yield', digits: 1 },
 ] as const;
 type Values = Omit<ValuationRow, 'year' | 'periodEnd'>;
-const number = (value: number | null, digits = 1) => value === null ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+const number = (value: number | null, digits = 1) => formatNumber(value, digits);
 const percent = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
 function ValueCells({ row }: { row: Values }) {
   const pe = (value: number | null) => row.eps !== null && row.eps <= 0 ? 'N/M' : number(value);
   return <><td>{number(row.high)}</td><td>{number(row.low)}</td><td>{number(row.eps, 2)}</td><td className="pe-column">{pe(row.highPE)}</td><td className="pe-column">{pe(row.lowPE)}</td><td>{number(row.dividend, 2)}</td><td>{percent(row.payout)}</td><td>{percent(row.highYield)}</td></>;
 }
 
-export default function ValuationPage({ study, annual, quote, highEPSForecast, epsForecastRate, onEditEPSForecast, controls }: { study: Study; annual: AnnualRow[]; quote: MarketQuote | null; highEPSForecast: number | null; epsForecastRate: string; onEditEPSForecast: () => void; controls: TableExclusions }) {
+export default function ValuationPage({ study, annual, trailing, quote, highEPSForecast, epsForecastRate, onEditEPSForecast, controls }: { study: Study; annual: AnnualRow[]; trailing?: Parameters<typeof currentValuation>[3]; quote: MarketQuote | null; highEPSForecast: number | null; epsForecastRate: string; onEditEPSForecast: () => void; controls: TableExclusions }) {
   const [years, setYears] = useState<5 | 10>(10);
   const compatible = Boolean(study.priceCurrency && study.priceCurrency === study.financialCurrency);
-  const allRows = valuationRows(annual, compatible, 10);
+  const allRows = useMemo(() => valuationRows(annual, compatible, 10), [annual, compatible]);
   const rows = allRows.slice(-years);
-  const includedRows = allRows.map(row => ({ ...row, ...Object.fromEntries(valueColumns.map(column => [column.key, isValueExcluded(controls, column.metric, row.year) ? null : row[column.key]])) }));
-  const five = valuationAverage(includedRows, 5), ten = valuationAverage(includedRows, 10);
-  const current = currentValuation(study, annual, quote);
+  const includedRows = useMemo(() => allRows.map(row => ({ ...row, ...Object.fromEntries(valueColumns.map(column => [column.key, isValueExcluded(controls, column.metric, row.year) ? null : row[column.key]])) })), [allRows, controls.excludedYears, controls.excludedValues]);
+  const averages = useMemo(() => [valuationAverage(includedRows, 5), valuationAverage(includedRows, 10)] as const, [includedRows]);
+  const [five, ten] = averages;
+  const current = useMemo(() => currentValuation(study, annual, quote, trailing), [study, annual, quote, trailing]);
   const averagePE = five.highPE !== null && five.lowPE !== null ? (five.highPE + five.lowPE) / 2 : null;
   return <><section className="valuation-section fundamentals" aria-labelledby="valuation-title">
     <div className="fundamentals-title"><h2 id="valuation-title">Price & Earnings History</h2><fieldset className="valuation-period"><legend className="sr-only">Historical period</legend>{([5, 10] as const).map(value => <label key={value}><input type="radio" name="valuation-years" value={value} checked={years === value} onChange={() => setYears(value)}/>{value} Years</label>)}</fieldset></div>
@@ -45,5 +47,5 @@ export default function ValuationPage({ study, annual, quote, highEPSForecast, e
     </table>{!annual.length && <p className="table-empty">Annual financial data is unavailable for this study.</p>}</div>
     <div className="valuation-summary"><span>5 Year Average P/E <strong>{number(averagePE)}</strong></span><span title={current.peSource}>Current P/E (TTM) <strong>{number(current.currentPE)}</strong></span></div>
     <p className="valuation-source-note">High/low P/E = fiscal-year high/low price ÷ annual EPS. Current row uses 52-week prices and {current.epsSource.toLowerCase()}. Averages use available observations; — unavailable, N/M nonpositive EPS.{!compatible && ' Historical P/E and yield require matching price and reporting currencies.'}</p>
-  </section><RiskReward study={study} current={current} history={includedRows} highEPSForecast={highEPSForecast} epsForecastRate={epsForecastRate} onEditEPSForecast={onEditEPSForecast}/></>;
+  </section><RiskReward study={study} current={current} history={includedRows} averages={averages} highEPSForecast={highEPSForecast} epsForecastRate={epsForecastRate} onEditEPSForecast={onEditEPSForecast}/></>;
 }

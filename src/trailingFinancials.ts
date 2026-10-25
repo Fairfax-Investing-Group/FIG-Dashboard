@@ -4,6 +4,13 @@ type Quarter = NonNullable<Study['quarterly']>[number];
 const year = (row: AnnualRow) => row.fiscalYear ?? Number(row.periodEnd.slice(0, 4));
 const valid = (value: number | null | undefined): value is number => value != null && Number.isFinite(value);
 
+/** One split-verification path for both chart and current valuation inputs. */
+export function studyTrailingFinancials(study: Pick<Study, 'quarterly' | 'epsAdjustment'>, annual: AnnualRow[]): Quarter[] {
+  return trailingFinancials(annual, (study.quarterly ?? []).map(row => ({ ...row,
+    eps: study.epsAdjustment?.status === 'normalized' && row.epsSplitFactor != null && row.epsSplitFactor > 0 ? row.eps : null,
+  })));
+}
+
 /** Roll the last annual filing forward using current YTD less prior-year YTD.
  * Raw quarter observations remain unchanged. Missing inputs never become zero.
  */

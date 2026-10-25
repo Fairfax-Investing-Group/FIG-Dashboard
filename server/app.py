@@ -144,7 +144,8 @@ class Handler(SimpleHTTPRequestHandler):
                     pass
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path, query = parsed.path, parse_qs(parsed.query)
         if path == '/api/health':
             return self.json_response(200, {'status': 'ok'})
         if path == '/api/portfolio':
@@ -152,7 +153,7 @@ class Handler(SimpleHTTPRequestHandler):
         news_match = re.fullmatch(r'/api/news/([A-Z0-9][A-Z0-9.\-]{0,14})', path)
         if news_match:
             try:
-                count = int(parse_qs(urlparse(self.path).query).get('count', ['25'])[0])
+                count = int(query.get('count', ['25'])[0])
                 if count not in range(25, 251, 25):
                     raise ValueError('Invalid news count.')
             except ValueError:
@@ -170,12 +171,12 @@ class Handler(SimpleHTTPRequestHandler):
         match = re.fullmatch(r'/api/studies/([a-f0-9-]{36})', path)
         if match:
             study = get_study(match.group(1))
-            if study and parse_qs(urlparse(self.path).query).get('view') == ['study']:
+            if study and query.get('view') == ['study']:
                 return self.json_response(200, study_view(study))
-            if study and study['Metadata'].get('DataStage') == 'fundamentals' and parse_qs(urlparse(self.path).query).get('view') == ['fundamentals']:
+            if study and study['Metadata'].get('DataStage') == 'fundamentals' and query.get('view') == ['fundamentals']:
                 study = fundamentals_view(study)
             if study:
-                download = parse_qs(urlparse(self.path).query).get('download') == ['1']
+                download = query.get('download') == ['1']
                 filename = re.sub(r'[^A-Za-z0-9_.-]', '_', study['Company']['Ticker']) + '-study.json' if download else None
                 return self.json_response(200, study, download_name=filename)
             return self.json_response(404, {'error': 'Study not found. Return to search to create one.'})
@@ -184,7 +185,8 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path, query = parsed.path, parse_qs(parsed.query)
         completion = re.fullmatch(r'/api/studies/([a-f0-9-]{36})/complete', path)
         preload = path == '/api/studies/preload'
         clear_preloads = path == '/api/studies/preload/clear'
@@ -200,7 +202,7 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError('Expected an object.')
-            stage = parse_qs(urlparse(self.path).query).get('stage', ['complete'])[0]
+            stage = query.get('stage', ['complete'])[0]
             if stage not in ('fundamentals', 'complete'):
                 raise ValueError('Invalid study stage.')
             if not completion and (not isinstance(body.get('ticker'), str) or type(body.get('cik')) is not int):
@@ -234,7 +236,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if 'application/x-ndjson' in self.headers.get('Accept', ''):
                     return self.stream_study(None, completion.group(1), completion=True)
                 study = complete_study(completion.group(1))
-                return self.json_response(200, study_view(study) if parse_qs(urlparse(self.path).query).get('view') == ['study'] else study)
+                return self.json_response(200, study_view(study) if query.get('view') == ['study'] else study)
             if stage == 'fundamentals' and 'application/x-ndjson' in self.headers.get('Accept', ''):
                 return self.stream_study(company, study_id, preload_group)
             study = create_study(company, fundamentals_only=stage == 'fundamentals', study_id=study_id, preload_group=preload_group)

@@ -1,10 +1,11 @@
+import { formatNumber, numberFormatter, formatDate, marketDate } from './lib/format';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
 import type { AnnualRow, MarketQuote, Metric, Study } from './types';
 import { annualGrowth, fiveYearAverage, fiveYearEstimate, logLinearRegression } from './financialMath';
 import { nearestChartLine, nearestObservation, interpolatedObservation } from './chartInteraction';
-import { trailingFinancials } from './trailingFinancials';
+import { studyTrailingFinancials } from './trailingFinancials';
 import { FIRST_HISTORY_YEAR, reportingYear, reportingYearOffset } from './reportingYears';
 import ValuationPage from './ValuationPage';
 import NewsPage from './NewsPage';
@@ -25,10 +26,10 @@ const metrics: { key: FinancialChartKey; title: string; color: string; note: str
 
 function money(value: number | null, currency: string | null, eps = false): string {
   if (value === null) return '—';
-  return `${new Intl.NumberFormat('en-US', { minimumFractionDigits: eps ? 2 : 0, maximumFractionDigits: eps ? 2 : 0 }).format(value)}${currency ? ` ${currency}` : ''}`;
+  return `${formatNumber(value, eps ? 2 : 0)}${currency ? ` ${currency}` : ''}`;
 }
 function displayDate(date: string) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return formatDate(new Date(`${date}T00:00:00`), { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 type FinancialChartKey = Metric | 'bookValuePerShare' | 'freeCashFlowPerShare';
@@ -193,28 +194,29 @@ function YearTick({ x = 0, y = 0, payload, excludedYears, onToggle }: { x?: numb
   </g>;
 }
 
-const OverlayChart = memo(function OverlayChart({ annual, study, excludedYears, onToggleYear, onRestoreYears, excludedValues, onResetExclusions, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; excludedYears: number[]; excludedValues: string[]; onToggleYear: (year: number) => void; onRestoreYears: () => void; onResetExclusions: () => void }) {
+const OverlayChart = memo(function OverlayChart({ annual, study, trailing, excludedYears, onToggleYear, onRestoreYears, excludedValues, onResetExclusions, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; trailing: ReturnType<typeof studyTrailingFinancials>; excludedYears: number[]; excludedValues: string[]; onToggleYear: (year: number) => void; onRestoreYears: () => void; onResetExclusions: () => void }) {
   const [offsets, setOffsets] = useState<Partial<Record<ChartKey, number>>>({});
   const [hidden, setHidden] = useState<ChartLineId[]>([]);
   const yearOffset = reportingYearOffset(annual);
-  const financials: ChartPoint[] = annual.map(row => ({ timestamp: Date.UTC(reportingYear(row, yearOffset), 0, 1), displayYear: reportingYear(row, yearOffset), reportedAt: timestamp(row.periodEnd), fiscalYear: row.fiscalYear ?? Number(row.periodEnd.slice(0, 4)), sales: row.sales, eps: row.eps, pretaxProfit: row.pretaxProfit, bookValuePerShare: row.bookValuePerShare ?? null, freeCashFlowPerShare: row.freeCashFlowPerShare ?? null }));
-  const lastAnnualDate = annual.map(row => row.periodEnd).sort().at(-1);
-  const trailingQuarters = trailingFinancials(annual, (study.quarterly ?? []).map(row => ({ ...row,
-    eps: study.epsAdjustment?.status === 'normalized' && row.epsSplitFactor != null && row.epsSplitFactor > 0 ? row.eps : null,
-  })));
-  const quarters: ChartPoint[] = lastAnnualDate ? trailingQuarters.filter(row => row.periodEnd > lastAnnualDate && (!row.form || ['10-Q', '10-Q/A', '6-K', '6-K/A'].includes(row.form))).map(row => ({
-    timestamp: timestamp(row.periodEnd), quarter: row.quarter, fiscalYear: row.fiscalYear, displayYear: reportingYear(row, yearOffset),
-    sales: row.sales, eps: study.epsAdjustment?.status === 'normalized' && row.epsSplitFactor != null && row.epsSplitFactor > 0 ? row.eps : null,
-    pretaxProfit: row.pretaxProfit, bookValuePerShare: row.bookValuePerShare ?? null, freeCashFlowPerShare: row.freeCashFlowPerShare ?? null,
-  })) : [];
-  const prices: ChartPoint[] = study.prices.filter(point => Number(point.date.slice(0, 4)) >= FIRST_HISTORY_YEAR).map(point => ({ timestamp: timestamp(point.date), close: point.close }));
-  const points = new Map<number, ChartPoint>();
-  for (const point of [...financials, ...quarters, ...prices]) points.set(point.timestamp, { ...points.get(point.timestamp), ...point });
-  const timeline = [...points.values()].sort((a, b) => a.timestamp - b.timestamp);
-  const series = chartSeries.map(definition => {
+  const { prices, timeline, financialPoints } = useMemo(() => {
+    const financials: ChartPoint[] = annual.map(row => ({ timestamp: Date.UTC(reportingYear(row, yearOffset), 0, 1), displayYear: reportingYear(row, yearOffset), reportedAt: timestamp(row.periodEnd), fiscalYear: row.fiscalYear ?? Number(row.periodEnd.slice(0, 4)), sales: row.sales, eps: row.eps, pretaxProfit: row.pretaxProfit, bookValuePerShare: row.bookValuePerShare ?? null, freeCashFlowPerShare: row.freeCashFlowPerShare ?? null }));
+    const lastAnnualDate = annual.map(row => row.periodEnd).sort().at(-1);
+    const quarters: ChartPoint[] = lastAnnualDate ? trailing.filter(row => row.periodEnd > lastAnnualDate && (!row.form || ['10-Q', '10-Q/A', '6-K', '6-K/A'].includes(row.form))).map(row => ({
+      timestamp: timestamp(row.periodEnd), quarter: row.quarter, fiscalYear: row.fiscalYear, displayYear: reportingYear(row, yearOffset),
+      sales: row.sales, eps: study.epsAdjustment?.status === 'normalized' && row.epsSplitFactor != null && row.epsSplitFactor > 0 ? row.eps : null,
+      pretaxProfit: row.pretaxProfit, bookValuePerShare: row.bookValuePerShare ?? null, freeCashFlowPerShare: row.freeCashFlowPerShare ?? null,
+    })) : [];
+    const prices: ChartPoint[] = study.prices.filter(point => Number(point.date.slice(0, 4)) >= FIRST_HISTORY_YEAR).map(point => ({ timestamp: timestamp(point.date), close: point.close }));
+    const points = new Map<number, ChartPoint>();
+    for (const point of [...financials, ...quarters, ...prices]) points.set(point.timestamp, { ...points.get(point.timestamp), ...point });
+    const timeline = [...points.values()].sort((a, b) => a.timestamp - b.timestamp);
+    return { prices, timeline, financialPoints: [...financials, ...quarters].sort((a, b) => a.timestamp - b.timestamp) };
+  }, [annual, trailing, study.prices, study.epsAdjustment?.status, yearOffset]);
+  const series = useMemo(() => chartSeries.map(definition => {
     const metric = definition.key === 'close' && study.priceInterval === '1wk' ? { ...definition, title: 'Split-normalized price · Weekly closes' } : definition;
-    const source = (metric.key === 'close' ? prices : [...financials, ...quarters]).slice().sort((a, b) => a.timestamp - b.timestamp);
-    const baseline = source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.[metric.key];
+    const source = metric.key === 'close' ? [...prices].sort((a, b) => a.timestamp - b.timestamp) : financialPoints;
+    const first = source.find(point => point[metric.key] != null && point[metric.key] !== 0);
+    const baseline = first?.[metric.key];
     const data = source.map(point => ({ ...point, [metric.key]: point[metric.key] == null ? null : baseline == null ? (point[metric.key] === 0 ? 0 : null) : point[metric.key]! / Math.abs(baseline) * 100 }));
     const annualPoints = data.filter(point => point.quarter == null).map(point => ({ periodEnd: new Date(point.timestamp).toISOString().slice(0, 10), value: point[metric.key] ?? null }));
     const includedRegression = metric.key === 'close' ? null : logLinearRegression(annualPoints, metricExcludedYears({ excludedYears, excludedValues }, metric.key), annualPoints.map(point => point.periodEnd));
@@ -224,17 +226,17 @@ const OverlayChart = memo(function OverlayChart({ annual, study, excludedYears, 
     const referenceFit = includedRegression === null && regression !== null;
     const regressionData: ChartPoint[] = regression?.fitted.map(point => ({ timestamp: timestamp(point.periodEnd), [metric.key]: point.value })) ?? [];
     const latest = source.filter(point => point.quarter == null && point[metric.key] != null).at(-1);
-    return { ...metric, data, rawData: source, referenceFit, regressionRaw: regressionData.map(point => ({ timestamp: point.timestamp, [metric.key]: point[metric.key]! * Math.abs(baseline!) / 100 })), regressionData, regressionRate: includedRegression?.growthRate ?? null, latest, baselineDate: source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.reportedAt ?? source.find(point => point[metric.key] != null && point[metric.key] !== 0)?.timestamp };
-  });
-  const lines = series.flatMap(metric => {
+    return { ...metric, data, rawData: source, referenceFit, regressionRaw: regressionData.map(point => ({ timestamp: point.timestamp, [metric.key]: point[metric.key]! * Math.abs(baseline!) / 100 })), regressionData, regressionRate: includedRegression?.growthRate ?? null, latest, baselineDate: first?.reportedAt ?? first?.timestamp };
+  }), [financialPoints, prices, study.priceInterval, excludedYears, excludedValues]);
+  const lines = useMemo(() => series.flatMap(metric => {
     const actual = metric.rawData.filter(point => point[metric.key] != null && (metric.key === 'close' || !isValueExcluded({ excludedYears, excludedValues }, metric.key, point.displayYear ?? new Date(point.timestamp).getUTCFullYear()))).map(point => ({ timestamp: point.timestamp, value: point[metric.key]! }));
     const fit = metric.regressionRaw.map(point => ({ timestamp: point.timestamp, value: point[metric.key]! }));
     return [
       ...(actual.length ? [{ id: `${metric.key}:actual` as ChartLineId, key: metric.key, name: `${metric.title} · Actual`, color: metric.color, kind: 'actual' as const, observations: actual }] : []),
       ...(fit.length ? [{ id: `${metric.key}:fit` as ChartLineId, key: metric.key, name: `${metric.title} · ${metric.referenceFit ? 'Reference fit' : 'Regression'}`, color: metric.color, kind: 'fit' as const, observations: fit }] : []),
     ];
-  });
-  const visibleLines = lines.filter(line => !hidden.includes(line.id));
+  }), [series, excludedYears, excludedValues]);
+  const visibleLines = useMemo(() => lines.filter(line => !hidden.includes(line.id)), [lines, hidden]);
   const visible = series.filter(metric => visibleLines.some(line => line.key === metric.key));
   const lineVisible = (id: ChartLineId) => lines.some(line => line.id === id) && !hidden.includes(id);
   function toggleLine(id: ChartLineId) {
@@ -248,7 +250,7 @@ const OverlayChart = memo(function OverlayChart({ annual, study, excludedYears, 
   // Apply logarithms before positioning each series in its vertical band. Bands
   // overlap to give rises and dips substantial vertical range in one chart.
   const bandHeight = 3.4;
-  const originalSpaced = series.map((metric, index) => {
+  const originalSpaced = useMemo(() => series.map((metric, index) => {
     const available = metric.data.map(point => point[metric.key]).filter((value): value is number => value != null);
     if (!available.length) return metric;
     const signed = available.some(value => value <= 0);
@@ -266,22 +268,26 @@ const OverlayChart = memo(function OverlayChart({ annual, study, excludedYears, 
       })),
       regressionData: metric.regressionData.map(point => ({ ...point, [metric.key]: bottom + (range === 0 ? bandHeight / 2 : (log(point[metric.key]!) - min) / range * bandHeight) })),
     };
-  });
+  }), [series]);
   const isolatedPoints = visible.length === 1 ? originalSpaced.filter(metric => metric.key === visible[0].key).flatMap(metric => metric.data.map(point => point[metric.key]).filter((value): value is number => value != null)) : [];
-  const spaced = originalSpaced.map(metric => ({ ...metric,
+  const spaced = useMemo(() => originalSpaced.map(metric => ({ ...metric,
     // Remove excluded observations rather than leaving null placeholders, so
     // both the rendered line and hover geometry connect their surviving neighbors.
     data: metric.data.filter(point => metric.key === 'close' || !isValueExcluded({ excludedYears, excludedValues }, metric.key, point.displayYear ?? new Date(point.timestamp).getUTCFullYear())).map(point => ({ ...point, [metric.key]: point[metric.key] == null ? null : point[metric.key]! + (offsets[metric.key] ?? 0) })),
     regressionData: metric.regressionData.map(point => ({ ...point, [metric.key]: point[metric.key]! + (offsets[metric.key] ?? 0) })),
-  }));
-  const hoverLines: HoverLine[] = visibleLines.map(line => {
-    const metric = spaced.find(metric => metric.key === line.key)!;
-    const data = line.kind === 'fit' ? metric.regressionData : metric.data;
+  })), [originalSpaced, excludedYears, excludedValues, offsets]);
+  const hoverMetadata = useMemo(() => new Map(lines.map(line => {
+    const metric = series.find(metric => metric.key === line.key)!;
     const millions = line.key === 'sales' || line.key === 'pretaxProfit';
     const currency = line.key === 'close' ? study.priceCurrency : study.financialCurrency;
-    const formatter = new Intl.NumberFormat('en-US', { ...(currency ? { style: 'currency' as const, currency, currencyDisplay: 'narrowSymbol' as const } : {}), minimumFractionDigits: millions ? 0 : 2, maximumFractionDigits: millions ? 0 : 2 });
-    return { id: line.id, name: line.kind === 'fit' ? line.name : metric.title, observations: line.observations, color: line.color, periods: Object.fromEntries(metric.rawData.map(point => [point.timestamp, line.key === 'close' ? `${study.priceInterval === '1wk' ? 'Week of ' : ''}${chartDate(point.timestamp)}` : point.quarter == null ? String(new Date(point.timestamp).getUTCFullYear()) : `Q${point.quarter} ${point.displayYear ?? point.fiscalYear} · ${line.key === 'bookValuePerShare' ? 'Quarter-end' : 'TTM'}`])), formatValue: (value: number) => `${formatter.format(millions ? value / 1_000_000 : value)}${millions ? 'M' : ''}`, points: data.map(point => ({ timestamp: point.timestamp, value: point[line.key] ?? null })) };
-  });
+    const formatter = numberFormatter({ ...(currency ? { style: 'currency' as const, currency, currencyDisplay: 'narrowSymbol' as const } : {}), minimumFractionDigits: millions ? 0 : 2, maximumFractionDigits: millions ? 0 : 2 });
+    return [line.id, { id: line.id, name: line.kind === 'fit' ? line.name : metric.title, observations: line.observations, color: line.color, periods: Object.fromEntries(metric.rawData.map(point => [point.timestamp, line.key === 'close' ? `${study.priceInterval === '1wk' ? 'Week of ' : ''}${chartDate(point.timestamp)}` : point.quarter == null ? String(new Date(point.timestamp).getUTCFullYear()) : `Q${point.quarter} ${point.displayYear ?? point.fiscalYear} · ${line.key === 'bookValuePerShare' ? 'Quarter-end' : 'TTM'}`])), formatValue: (value: number) => `${formatter.format(millions ? value / 1_000_000 : value)}${millions ? 'M' : ''}` }] as const;
+  })), [lines, series, study.priceCurrency, study.financialCurrency, study.priceInterval]);
+  const hoverLines = useMemo<HoverLine[]>(() => visibleLines.map(line => {
+    const metric = spaced.find(metric => metric.key === line.key)!;
+    const data = line.kind === 'fit' ? metric.regressionData : metric.data;
+    return { ...hoverMetadata.get(line.id)!, points: data.map(point => ({ timestamp: point.timestamp, value: point[line.key] ?? null })) };
+  }), [visibleLines, spaced, hoverMetadata]);
   const domain: [number, number] = isolatedPoints.length ? [Math.min(...isolatedPoints) - 0.2, Math.max(...isolatedPoints) + 0.2] : [0, series.length - 1 + bandHeight + 0.3];
   const baselines = spaced.filter(metric => visibleLines.some(line => line.key === metric.key)).flatMap(metric => {
     const first = metric.data.find(point => point[metric.key] != null);
@@ -318,7 +324,7 @@ const pendingAnnualRows: AnnualRow[] = Array.from({ length: 10 }, (_, index) => 
   salesSource: null, epsSource: null, pretaxProfitSource: null,
 }));
 
-function FinancialTable({ annual, study, controls, forecasts, onForecastChange, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; controls: TableExclusions; forecasts: FinancialForecasts; onForecastChange: (key: keyof FinancialForecasts, value: string) => void }) {
+const FinancialTable = memo(function FinancialTable({ annual, study, controls, forecasts, onForecastChange, pending = false }: { pending?: boolean; annual: AnnualRow[]; study: Study; controls: TableExclusions; forecasts: FinancialForecasts; onForecastChange: (key: keyof FinancialForecasts, value: string) => void }) {
   const { excludedYears } = controls;
   const placeholders = pending && annual.length === 0;
   const rows = placeholders ? pendingAnnualRows : [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
@@ -363,7 +369,7 @@ function FinancialTable({ annual, study, controls, forecasts, onForecastChange, 
       })}</tbody>
     </table>{!rows.length && <p className="table-empty">Annual financials could not be loaded for this company.</p>}</div>
   </section>;
-}
+});
 
 function ManagementTrend({ values, name, lowerIsBetter = false }: { values: (number | null)[]; name: string; lowerIsBetter?: boolean }) {
   const available = values.flatMap((value, index) => value === null ? [] : [{ value, index }]);
@@ -468,12 +474,12 @@ const CompanyHeader = memo(function CompanyHeader({ study, quote, quoteStatus, p
   const change = regular ? regular.change : study.priceInterval !== '1wk' && latest && previous ? latest.close - previous.close : null;
   const percent = regular ? regular.percent : change !== null && previous && previous.close > 0 ? change / previous.close * 100 : null;
   const signed = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
-  const quoteDate = (value: string) => new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' });
-  const price = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat('en-US', {
+  const quoteDate = marketDate;
+  const price = (value: number | null | undefined) => value == null ? '—' : numberFormatter({
     ...(priceCurrency ? { style: 'currency', currency: priceCurrency, currencyDisplay: 'narrowSymbol' } : {}),
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(value);
-  const compact = (millions: number | null | undefined, currency = false) => millions == null ? '—' : new Intl.NumberFormat('en-US', {
+  const compact = (millions: number | null | undefined, currency = false) => millions == null ? '—' : numberFormatter({
     notation: 'compact', maximumFractionDigits: 1,
     ...(currency && priceCurrency ? { style: 'currency', currency: priceCurrency, currencyDisplay: 'narrowSymbol' } : {}),
   }).format(millions * 1e6);
@@ -524,7 +530,7 @@ function StudyPageContent({ study, onBack, onRefresh, staticSnapshot = false, on
     eps: inputs?.initial?.eps_growth_percent == null ? '' : String(inputs.initial.eps_growth_percent),
   } }));
   const forecasts = forecastsByStudy[study.id] ?? { sales: '', eps: '' };
-  const updateForecast = (key: keyof FinancialForecasts, value: string) => !readOnly && setForecastsByStudy(current => ({ ...current, [study.id]: { ...(current[study.id] ?? { sales: '', eps: '' }), [key]: value } }));
+  const updateForecast = useCallback((key: keyof FinancialForecasts, value: string) => !readOnly && setForecastsByStudy(current => ({ ...current, [study.id]: { ...(current[study.id] ?? { sales: '', eps: '' }), [key]: value } })), [study.id, readOnly]);
   const { quote, quoteStatus } = useMarketQuote(study.company.ticker);
   const [yearExclusions, setYearExclusions] = useState<Record<string, number[]>>(() => ({ [study.id]: inputs?.initial?.excluded_years ?? [] }));
   const excludedYears = yearExclusions[study.id] ?? emptyYears;
@@ -541,7 +547,7 @@ function StudyPageContent({ study, onBack, onRefresh, staticSnapshot = false, on
     const years = current[study.id] ?? [];
     return { ...current, [study.id]: years.includes(year) ? years.filter(item => item !== year) : [...years, year] };
   }), [study.id, readOnly]);
-  const controls: TableExclusions = { readOnly, excludedYears, excludedValues, onToggleYear: toggleYear, onToggleValue: toggleValue, onResetExclusions: resetExclusions };
+  const controls = useMemo<TableExclusions>(() => ({ readOnly, excludedYears, excludedValues, onToggleYear: toggleYear, onToggleValue: toggleValue, onResetExclusions: resetExclusions }), [readOnly, excludedYears, excludedValues, toggleYear, toggleValue, resetExclusions]);
   useEffect(() => {
     if (!active) return;
     document.title = `${study.company.ticker} · Stock Study`;
@@ -554,7 +560,11 @@ function StudyPageContent({ study, onBack, onRefresh, staticSnapshot = false, on
       ...row, eps: normalized && row.epsSplitFactor != null && Number.isFinite(row.epsSplitFactor) && row.epsSplitFactor > 0 ? row.eps : null,
     }));
   }, [study.annual, normalized]);
-  const latestEPS = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).filter(row => row.eps !== null && !isValueExcluded(controls, 'eps', reportingYear(row, reportingYearOffset(annual)))).at(-1)?.eps ?? null;
+  const trailing = useMemo(() => studyTrailingFinancials(study, annual), [annual, study.quarterly, study.epsAdjustment?.status]);
+  const latestEPS = useMemo(() => {
+    const offset = reportingYearOffset(annual);
+    return [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).filter(row => row.eps !== null && !isValueExcluded(controls, 'eps', reportingYear(row, offset))).at(-1)?.eps ?? null;
+  }, [annual, controls]);
   const highEPSForecast = fiveYearEstimate(latestEPS, forecasts.eps);
   const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);
   return <main className="study-page" aria-busy={fundamentalsStatus === 'loading'}>
@@ -573,11 +583,11 @@ function StudyPageContent({ study, onBack, onRefresh, staticSnapshot = false, on
     {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && !staticSnapshot && <button className="text-button" onClick={refresh}>Retry both sources</button>}</aside>}
     {!pending && !study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study.{staticSnapshot ? ' A live refresh requires a study API.' : <> <button className="text-button" onClick={refresh}>Refresh study to normalize EPS</button>.</>}</aside>}
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>
-      <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} pending={pending} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
+      <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} trailing={trailing} pending={pending} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
       <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls} pending={pending} forecasts={forecasts} onForecastChange={updateForecast}/>
       <ManagementTable key={`management-${study.id}`} annual={annual} pending={pending}/>
     </div>
-    <div id="panel-valuation" role="tabpanel" aria-labelledby="tab-valuation" hidden={tab !== 'valuation'}><ValuationPage key={`valuation-${study.id}`} study={study} annual={annual} quote={quote} controls={controls} highEPSForecast={highEPSForecast} epsForecastRate={forecasts.eps} onEditEPSForecast={() => { setTab('fundamentals'); window.requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Earnings per share annual forecast percentage"]')?.focus()); }}/></div>
+    <div id="panel-valuation" role="tabpanel" aria-labelledby="tab-valuation" hidden={tab !== 'valuation'}><ValuationPage key={`valuation-${study.id}`} study={study} annual={annual} trailing={trailing} quote={quote} controls={controls} highEPSForecast={highEPSForecast} epsForecastRate={forecasts.eps} onEditEPSForecast={() => { setTab('fundamentals'); window.requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Earnings per share annual forecast percentage"]')?.focus()); }}/></div>
     <div id="panel-news" role="tabpanel" aria-labelledby="tab-news" hidden={tab !== 'news'}><NewsPage key={study.company.ticker} ticker={study.company.ticker} active={tab === 'news'}/></div>
   </main>;
 }

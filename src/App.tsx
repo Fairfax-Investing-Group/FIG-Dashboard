@@ -8,11 +8,13 @@ import type { Study, StudyDocument } from './types';
 import type { SavedStudy } from './lib/studyInputs';
 import { StudyCache } from './studyCache';
 import { readStudyStream } from './studyStream';
-import { studyView } from './studyDocument';
+import { studyView, studyCompany } from './studyDocument';
 import { apiUrl } from './lib/api';
 import { loadStaticStudy } from './lib/staticStudy';
+import { readStudyResponse, postStudy, isAbortError } from './lib/studyApi';
 
 type BrowserPreload = { controller: AbortController; document?: StudyDocument; view?: Study; renderedDocument?: StudyDocument; expires: number; timer: ReturnType<typeof setTimeout> };
+const disposePreload = (entry: BrowserPreload) => { entry.controller.abort(); clearTimeout(entry.timer); };
 const companyKey = (company: Company) => `${company.cik}:${company.ticker}`;
 const previewView = (entry: BrowserPreload, page: Study) => {
   if (entry.view?.id === page.id && entry.renderedDocument === entry.document) return entry.view;
@@ -23,16 +25,6 @@ const previewView = (entry: BrowserPreload, page: Study) => {
 };
 
 const readRoute = () => window.location.hash.replace(/^#/, '');
-
-async function readResponse(response: Response): Promise<StudyDocument> {
-  if (!response.headers.get('content-type')?.includes('application/json')) {
-    throw new Error('The study backend is unavailable. Start the app with npm run dev and try again.');
-  }
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Could not load the study. Please try again.');
-  if (data.SchemaVersion !== 1) throw new Error('Unsupported study data version. Restart the backend and refresh.');
-  return data as StudyDocument;
-}
 
 export default function App() {
   return <AuthProvider><AppContent/></AuthProvider>;
@@ -71,7 +63,7 @@ function AppContent() {
     }));
   }), []);
   function clearBrowserPreloads() {
-    for (const entry of browserPreloads.current.values()) { entry.controller.abort(); clearTimeout(entry.timer); }
+    for (const entry of browserPreloads.current.values()) { disposePreload(entry); }
     browserPreloads.current.clear();
   }
   useEffect(() => () => clearBrowserPreloads(), []);
@@ -123,19 +115,19 @@ function AppContent() {
     setError(null);
     setPendingView(previous => previous?.id === match[1] ? previous : unknownPendingStudy(match[1]));
     fetch(apiUrl(`/api/studies/${match[1]}?view=study`), { signal: controller.signal })
-      .then(readResponse)
-      .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyView(data).company); setStudyDocument(data); setPendingView(null); })
+      .then(readStudyResponse)
+      .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyCompany(data)); setStudyDocument(data); setPendingView(null); })
       .catch(async error => {
-        if (controller.signal.aborted || error.name === 'AbortError') return;
+        if (controller.signal.aborted || isAbortError(error)) return;
         try {
           const data = await loadStaticStudy(match[1], controller.signal);
           if (controller.signal.aborted) return;
           cache.current.set(data.Study.StudyID, data);
-          rememberStudyCompany(data.Study.StudyID, studyView(data).company);
+          rememberStudyCompany(data.Study.StudyID, studyCompany(data));
           setStudyDocument(data);
           setPendingView(null);
         } catch (staticError) {
-          if (controller.signal.aborted || (staticError instanceof Error && staticError.name === 'AbortError')) return;
+          if (controller.signal.aborted || isAbortError(staticError)) return;
           setError(staticError instanceof Error ? staticError.message : error.message);
         }
       })
@@ -151,20 +143,18 @@ function AppContent() {
     if (!studyId || readyStudyId !== studyId || dataStage !== 'fundamentals' || loading || route !== `/study/${studyId}`) return;
     const controller = new AbortController();
     setDetailsStatus('loading');
-    fetch(apiUrl(`/api/studies/${studyId}/complete?view=study`), {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: '{}', signal: controller.signal,
-    }).then(response => readStudyStream(response, data => {
+    postStudy(`/api/studies/${studyId}/complete?view=study`, {}, controller.signal, data => {
       if (!controller.signal.aborted && readRoute() === `/study/${studyId}`) {
         cache.current.set(studyId, data);
         setStudyDocument(data);
       }
-    }, readResponse)).then(data => {
+    }).then(data => {
       if (controller.signal.aborted || readRoute() !== `/study/${studyId}`) return;
       cache.current.set(studyId, data);
       setStudyDocument(data);
       setDetailsStatus('idle');
     }).catch(error => {
-      if (!controller.signal.aborted && error.name !== 'AbortError') setDetailsStatus('error');
+      if (!controller.signal.aborted && !isAbortError(error)) setDetailsStatus('error');
     });
     return () => controller.abort();
   }, [studyId, dataStage, readyStudyId, loading, route, detailsRetry]);
@@ -173,12 +163,12 @@ function AppContent() {
     preloadGroup.current ??= crypto.randomUUID();
     const group = preloadGroup.current, key = companyKey(company);
     const previous = browserPreloads.current.get(key);
-    if (previous) { previous.controller.abort(); clearTimeout(previous.timer); browserPreloads.current.delete(key); }
+    if (previous) { disposePreload(previous); browserPreloads.current.delete(key); }
     // Bound payloads, readers, and timers even while the closest match changes.
     while (browserPreloads.current.size >= 5) {
       const oldest = browserPreloads.current.keys().next().value!;
       const entry = browserPreloads.current.get(oldest)!;
-      entry.controller.abort(); clearTimeout(entry.timer); browserPreloads.current.delete(oldest);
+      disposePreload(entry); browserPreloads.current.delete(oldest);
     }
     const controller = new AbortController();
     const entry: BrowserPreload = { controller, expires: Date.now() + 55_000, timer: setTimeout(() => {
@@ -199,7 +189,7 @@ function AppContent() {
       });
       if (!response.ok) throw new Error('Preload busy');
       if (response.headers.get('content-type')?.includes('application/x-ndjson')) {
-        publish(await readStudyStream(response, publish, readResponse));
+        publish(await readStudyStream(response, publish, readStudyResponse));
       }
       return !controller.signal.aborted;
     } catch {
@@ -236,16 +226,12 @@ function AppContent() {
     try {
       let data: StudyDocument;
       try {
-        data = await fetch(apiUrl('/api/studies?stage=fundamentals'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-          body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }),
-          signal: controller.signal,
-        }).then(response => readStudyStream(response, document => {
+        data = await postStudy('/api/studies?stage=fundamentals',
+          { ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }, controller.signal, document => {
           if (!controller.signal.aborted) setPendingView(studyView(document));
-        }, readResponse));
+        });
       } catch (apiError) {
-        if (controller.signal.aborted || (apiError instanceof Error && apiError.name === 'AbortError')) throw apiError;
+        if (controller.signal.aborted || isAbortError(apiError)) throw apiError;
         data = await loadStaticStudy(company.ticker, controller.signal);
       }
       if (controller.signal.aborted) return;

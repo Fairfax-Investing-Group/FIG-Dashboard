@@ -120,20 +120,28 @@ def _discard_locked(key):
     return job
 
 
+def _expire_closed_groups_locked(now):
+    for group, (expires, _) in list(_CLOSED_GROUPS.items()):
+        if expires <= now:
+            del _CLOSED_GROUPS[group]
+
+
+def _expire_jobs_locked(now):
+    for key, job in list(_JOBS.items()):
+        if now - job.started >= TTL_SECONDS:
+            _discard_locked(key)
+
+
 def start_preload(company, group=None, priority=None):
     ensure_preload_reaper()
     key = preload_key(company, group)
     with _LOCK:
         now = time.monotonic()
-        for closed, (expires, _) in list(_CLOSED_GROUPS.items()):
-            if expires <= now:
-                del _CLOSED_GROUPS[closed]
+        _expire_closed_groups_locked(now)
         closed = _CLOSED_GROUPS.get(group)
         if closed and closed[1] != (company['cik'], company['ticker']):
             return False
-        for old_key, job in list(_JOBS.items()):
-            if now - job.started >= TTL_SECONDS:
-                _discard_locked(old_key)
+        _expire_jobs_locked(now)
         if key in _JOBS:
             return True
         if not _SLOTS.acquire(blocking=False):
@@ -167,45 +175,28 @@ def take_preload(company, group=None):
 
 
 def clear_unselected_preloads(group, selected):
-    from server.yahoo_profile import discard_profile
     keep = (selected['cik'], selected['ticker'])
     with _LOCK:
         now = time.monotonic()
-        for closed, (expires, _) in list(_CLOSED_GROUPS.items()):
-            if expires <= now:
-                del _CLOSED_GROUPS[closed]
+        _expire_closed_groups_locked(now)
         _CLOSED_GROUPS[group] = (now + TTL_SECONDS, keep)
-        discarded = []
+        discarded = 0
         for key, job in list(_JOBS.items()):
             if job.group == group and (job.company['cik'], job.company['ticker']) != keep:
-                del _JOBS[key]
-                job.discard()
-                discarded.append(job.company['ticker'])
-        for ticker in set(discarded):
-            if not any(job.company['ticker'] == ticker for job in _JOBS.values()):
-                discard_profile(ticker)
-    return len(discarded)
+                _discard_locked(key)
+                discarded += 1
+    return discarded
 
 
 _REAPER_STARTED = False
 
 
 def expire_preloads(now=None):
-    from server.yahoo_profile import expire_profiles, discard_profile
+    from server.yahoo_profile import expire_profiles
     now = time.monotonic() if now is None else now
     with _LOCK:
-        symbols = []
-        for key, job in list(_JOBS.items()):
-            if now - job.started >= TTL_SECONDS:
-                del _JOBS[key]
-                job.discard()
-                symbols.append(job.company['ticker'])
-        for group, (expires, _) in list(_CLOSED_GROUPS.items()):
-            if expires <= now:
-                del _CLOSED_GROUPS[group]
-        for symbol in symbols:
-            if not any(job.company['ticker'] == symbol for job in _JOBS.values()):
-                discard_profile(symbol)
+        _expire_jobs_locked(now)
+        _expire_closed_groups_locked(now)
     expire_profiles()
 
 
