@@ -1,3 +1,4 @@
+import { apiUrl } from './apiUrl';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale, useXAxisInverseScale, ZIndexLayer } from 'recharts';
@@ -438,7 +439,7 @@ function useMarketQuote(ticker: string) {
       controller?.abort();
       controller = new AbortController();
       try {
-        const response = await fetch(`/api/quotes/${encodeURIComponent(ticker)}`, { signal: controller.signal });
+        const response = await fetch(apiUrl(`/api/quotes/${encodeURIComponent(ticker)}`), { signal: controller.signal });
         if (!response.ok) throw new Error('Quote unavailable');
         const value = await response.json() as MarketQuote;
         if (!('regular' in value) || !('postMarket' in value)) throw new Error('Invalid quote');
@@ -564,7 +565,7 @@ function StudyPageContent({ study, onBack, onRefresh, onFundamentalsReady, detai
         setTab(next);
         document.getElementById(`tab-${next}`)?.focus();
       }
-    }}>{item.label}</button>)}</div><div className="study-header-actions">{pending ? <span className="export-button" aria-disabled="true">Export JSON ↓</span> : <a className="export-button" href={`/api/studies/${study.id}`} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a>}<button className="primary-button" disabled={fundamentalsStatus === 'loading'} onClick={refresh}>↻ Refresh study</button><SaveStudy study={study}/></div></nav>
+    }}>{item.label}</button>)}</div><div className="study-header-actions">{pending ? <span className="export-button" aria-disabled="true">Export JSON ↓</span> : <a className="export-button" href={apiUrl(`/api/studies/${study.id}?download=1`)} download={`${study.company.ticker}-study.json`}>Export JSON ↓</a>}<button className="primary-button" disabled={fundamentalsStatus === 'loading'} onClick={refresh}>↻ Refresh study</button><SaveStudy study={study}/></div></nav>
     <CompanyHeader study={study} quote={quote} quoteStatus={quoteStatus} pending={pending}/>
     {fundamentalsStatus === 'error' && <aside className="study-background-status" role="alert">{fundamentalsError ?? 'Financial data could not be loaded.'} <button type="button" className="text-button" onClick={onRetryFundamentals}>Retry</button></aside>}
     {detailsStatus === 'error' && <aside className="study-background-status" role="alert">Additional study data could not be loaded. Your fundamentals remain available. <button type="button" className="text-button" onClick={onRetryDetails}>Retry</button></aside>}

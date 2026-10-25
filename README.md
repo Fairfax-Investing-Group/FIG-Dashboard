@@ -24,6 +24,14 @@ npm run dev
 
 The default identifies this local research app. SEC may block requests without adequate contact identification or rate-limit an IP; the UI reports upstream failures and lets you retry. No API keys are required for SEC/Yahoo financial requests. Supabase login uses the public project settings described below. Set `API_PORT` to use another backend port; the Vite proxy uses the same value.
 
+## Hosted live study generation
+
+GitHub Pages cannot run the Python study API. Deploy the included backend
+Docker image as a web service, configure `STUDY_ALLOWED_ORIGINS` on that service,
+and set the repository Actions variable `VITE_STUDY_API_URL` to its HTTPS origin.
+Redeploy Pages to include that value. See [hosting setup](docs/hosting.md) for
+exact steps. Supabase settings alone cannot enable live SEC/Yahoo study pulls.
+
 ## Supabase login and saved studies
 
 The homepage and `#/login` support Supabase email/password authentication,

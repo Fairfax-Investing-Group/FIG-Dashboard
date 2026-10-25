@@ -21,6 +21,13 @@ STUDY_SLOTS = threading.BoundedSemaphore(4)
 COMPLETION_SLOTS = threading.BoundedSemaphore(2)
 
 
+def allowed_origin(origin):
+    if not origin:
+        return False
+    allowed = {value.strip().rstrip('/') for value in os.environ.get('STUDY_ALLOWED_ORIGINS', '').split(',') if value.strip()}
+    return origin in allowed
+
+
 def accepts_gzip(header):
     for entry in header.lower().split(','):
         encoding, *parameters = entry.strip().split(';')
@@ -37,7 +44,27 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT / 'dist'), **kwargs)
 
-    def json_response(self, status, data):
+    def end_headers(self):
+        origin = self.headers.get('Origin')
+        if allowed_origin(origin):
+            self.send_header('Access-Control-Allow-Origin', origin)
+        # Responses can differ by Origin, including when no CORS header is sent.
+        self.send_header('Vary', 'Origin')
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        if not urlparse(self.path).path.startswith('/api/'):
+            return self.json_response(404, {'error': 'API route not found.'})
+        if not allowed_origin(self.headers.get('Origin')):
+            return self.json_response(403, {'error': 'Frontend origin is not allowed.'})
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept')
+        self.send_header('Access-Control-Max-Age', '600')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
+    def json_response(self, status, data, download_name=None):
         body = json.dumps(data, allow_nan=False, separators=(',', ':')).encode()
         compressed = len(body) >= 1024 and accepts_gzip(self.headers.get('Accept-Encoding', ''))
         if compressed:
@@ -47,6 +74,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header('Vary', 'Accept-Encoding')
         if compressed:
             self.send_header('Content-Encoding', 'gzip')
+        if download_name:
+            self.send_header('Content-Disposition', f'attachment; filename="{download_name}"')
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
@@ -138,7 +167,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json_response(200, study_view(study))
             if study and study['Metadata'].get('DataStage') == 'fundamentals' and parse_qs(urlparse(self.path).query).get('view') == ['fundamentals']:
                 study = fundamentals_view(study)
-            return self.json_response(200, study) if study else self.json_response(404, {'error': 'Study not found. Return to search to create one.'})
+            if study:
+                download = parse_qs(urlparse(self.path).query).get('download') == ['1']
+                filename = re.sub(r'[^A-Za-z0-9_.-]', '_', study['Company']['Ticker']) + '-study.json' if download else None
+                return self.json_response(200, study, download_name=filename)
+            return self.json_response(404, {'error': 'Study not found. Return to search to create one.'})
         if path.startswith('/api/'):
             return self.json_response(404, {'error': 'API route not found.'})
         return super().do_GET()
@@ -150,7 +183,7 @@ class Handler(SimpleHTTPRequestHandler):
         clear_preloads = path == '/api/studies/preload/clear'
         if path != '/api/studies' and not completion and not preload and not clear_preloads:
             return self.json_response(404, {'error': 'API route not found.'})
-        # JSON requests only; no cross-origin API access is enabled.
+        # JSON requests only; configured frontend origins can pass CORS preflight.
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             return self.json_response(415, {'error': 'Expected application/json.'})
         try:
@@ -205,11 +238,12 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('API_PORT', '8000'))
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    port = int(os.environ.get('PORT') or os.environ.get('API_PORT', '8000'))
+    host = os.environ.get('API_HOST', '127.0.0.1')
+    server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     portfolio_scheduler = start_portfolio_scheduler()
-    print(f'Stock study API: http://127.0.0.1:{port}', flush=True)
+    print(f'Stock study API: http://{host}:{port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

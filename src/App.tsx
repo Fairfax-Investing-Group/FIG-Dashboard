@@ -1,3 +1,4 @@
+import { apiUrl } from './apiUrl';
 import { AuthProvider } from './auth/AuthProvider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SearchPage, { type Company } from './SearchPage';
@@ -64,7 +65,7 @@ function AppContent() {
     const group = preloadGroup.current;
     if (!group || !active || readyStudyId !== active.id) return;
     preloadGroup.current = null;
-    void fetch('/api/studies/preload/clear', {
+    void fetch(apiUrl('/api/studies/preload/clear'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preloadGroup: group, ticker: active.company.ticker, cik: active.company.cik }),
     }).catch(() => { /* Expiry still clears unused preloads if the server is unreachable. */ });
@@ -99,7 +100,7 @@ function AppContent() {
     setLoading(true);
     setError(null);
     setPendingView(previous => previous?.id === match[1] ? previous : unknownPendingStudy(match[1]));
-    fetch(`/api/studies/${match[1]}?view=study`, { signal: controller.signal })
+    fetch(apiUrl(`/api/studies/${match[1]}?view=study`), { signal: controller.signal })
       .then(readResponse)
       .then(data => { if (controller.signal.aborted) return; cache.current.set(data.Study.StudyID, data); rememberStudyCompany(data.Study.StudyID, studyView(data).company); setStudyDocument(data); setPendingView(null); })
       .catch(error => { if (!controller.signal.aborted && error.name !== 'AbortError') setError(error.message); })
@@ -115,7 +116,7 @@ function AppContent() {
     if (!studyId || readyStudyId !== studyId || dataStage !== 'fundamentals' || loading || route !== `/study/${studyId}`) return;
     const controller = new AbortController();
     setDetailsStatus('loading');
-    fetch(`/api/studies/${studyId}/complete?view=study`, {
+    fetch(apiUrl(`/api/studies/${studyId}/complete?view=study`), {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: '{}', signal: controller.signal,
     }).then(response => readStudyStream(response, data => {
       if (!controller.signal.aborted && readRoute() === `/study/${studyId}`) {
@@ -136,7 +137,7 @@ function AppContent() {
   const preloadStudy = useCallback((company: Company, priority = 0): Promise<boolean> => {
     // Scope speculative work to this search so opening a study can discard it.
     preloadGroup.current ??= crypto.randomUUID();
-    return fetch('/api/studies/preload', {
+    return fetch(apiUrl('/api/studies/preload'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ticker: company.ticker, cik: company.cik, preloadGroup: preloadGroup.current, priority }),
     }).then(response => response.ok).catch(() => false);
@@ -162,7 +163,7 @@ function AppContent() {
     setError(null);
     setLoading(true);
     try {
-      const data = await fetch('/api/studies?stage=fundamentals', {
+      const data = await fetch(apiUrl('/api/studies?stage=fundamentals'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
         body: JSON.stringify({ ticker: company.ticker, cik: company.cik, studyId: id, preloadGroup: group }),

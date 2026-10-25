@@ -1,3 +1,4 @@
+import { apiUrl } from './apiUrl';
 import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, usePlotArea, useYAxisScale } from 'recharts';
 import initialPortfolio from './data/portfolio.json';
@@ -63,7 +64,7 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
       controller?.abort();
       controller = new AbortController();
       try {
-        const response = await fetch('/api/portfolio', { signal: controller.signal });
+        const response = await fetch(apiUrl('/api/portfolio'), { signal: controller.signal });
         if (!response.ok) throw new Error('Portfolio unavailable');
         const data = await response.json() as Portfolio;
         if (!Array.isArray(data.holdings) || !Array.isArray(data.performance) || typeof data.summary?.portfolioValue !== 'number') throw new Error('Invalid portfolio');
