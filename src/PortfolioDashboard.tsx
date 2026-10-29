@@ -10,7 +10,7 @@ type Portfolio = Omit<typeof initialPortfolio, 'holdings' | 'summary'> & {
   summary: typeof initialPortfolio.summary & { beta?: number | null };
   lastSuccessfulAt?: string;
   priceSource?: string;
-  refresh?: { status: 'ready' | 'pending' | 'updating' | 'error'; error: string | null; nextRefreshAt: string | null; retryAt: string | null };
+  refresh?: { status: 'ready' | 'pending' | 'updating' | 'error'; error: string | null; nextRefreshAt: string | null; retryAt: string | null; nextQuoteRefreshAt?: string | null; quoteStatus?: 'live' | 'pending' | 'closed' | 'error'; quoteUpdatedAt?: string | null; quoteError?: string | null };
 };
 type History = { date: string; value: number }[];
 const currency = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value);
@@ -68,7 +68,9 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
   const [updateUnavailable, setUpdateUnavailable] = useState(false);
   useEffect(() => {
     let controller: AbortController | null = null;
+    let timer = 0;
     let active = true;
+    let nextQuoteRefreshAt: string | null = null;
     const update = async () => {
       if (document.hidden) return;
       controller?.abort();
@@ -77,7 +79,7 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
         let data: Portfolio | null = null;
         for (const source of ['/api/portfolio', '/portfolio-current.json']) {
           try {
-            const response = await fetch(source.startsWith('/api/') ? apiUrl(source) : source, { signal: controller.signal });
+            const response = await fetch(source.startsWith('/api/') ? apiUrl(source) : source, { signal: controller.signal, cache: 'no-store' });
             if (!response.ok) continue;
             const candidate = await response.json() as Portfolio;
             if (!Array.isArray(candidate.holdings) || !Array.isArray(candidate.performance) || typeof candidate.summary?.portfolioValue !== 'number') continue;
@@ -88,16 +90,27 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
           }
         }
         if (!data) throw new Error('Portfolio unavailable');
-        if (active) { setPortfolio(data); setUpdateUnavailable(false); }
+        if (active) {
+          setPortfolio(data);
+          setUpdateUnavailable(false);
+          nextQuoteRefreshAt = data.refresh?.nextQuoteRefreshAt ?? null;
+          window.clearTimeout(timer);
+          if (nextQuoteRefreshAt) {
+            const delay = Math.max(0, new Date(nextQuoteRefreshAt).getTime() - Date.now());
+            timer = window.setTimeout(() => { void update(); }, delay);
+          }
+        }
       } catch (error) {
         if (active && !(error instanceof DOMException && error.name === 'AbortError')) setUpdateUnavailable(true);
       }
     };
     void update();
-    const timer = window.setInterval(() => { void update(); }, 60_000);
-    const onVisible = () => { if (!document.hidden) void update(); };
+    const onVisible = () => {
+      if (document.hidden) return;
+      if (!nextQuoteRefreshAt || new Date(nextQuoteRefreshAt).getTime() <= Date.now()) void update();
+    };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { active = false; controller?.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { active = false; controller?.abort(); window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
   const [period, setPeriod] = useState<'Lifetime returns' | '1M' | '3M' | 'YTD'>('Lifetime returns');
   const [partnerName, setPartnerName] = useState<string | null>(null);
@@ -186,7 +199,7 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
       <section className="portfolio-panel" aria-labelledby="portfolio-indexes-title"><div className="portfolio-panel-heading"><h3 id="portfolio-indexes-title">Indexes</h3></div><table className="portfolio-small-table"><thead><tr><th>Name</th><th>Price</th><th>History</th></tr></thead><tbody>{portfolio.indexes.map(item => <tr key={item.name}><th scope="row">{item.name}</th><td>{indexPrice(item.price)}</td><td><Sparkline history={item.history} name={item.name} stretch/></td></tr>)}</tbody></table></section>
     </div>
     {partner && <section id="portfolio-partner-detail" className="portfolio-panel portfolio-partner-detail" aria-label={`${partner.name} pitch performance`}><div className="portfolio-panel-heading"><h3>{partner.name} · Pitch & performance track record</h3><button onClick={() => setPartnerName(null)} aria-label="Close pitch details">Close ×</button></div><div className="portfolio-table-scroll"><table className="portfolio-table"><thead><tr><th>Ticker</th><th>Date pitched</th><th>Pitch price</th><th>Current price</th><th>Shares</th><th>Cost</th><th>Market value</th><th>Gain / loss</th><th>Return since pitch</th></tr></thead><tbody>{partner.pitches.map(pitch => <tr key={pitch.ticker}><th scope="row"><button className="portfolio-ticker" onClick={() => onStudy(pitch.ticker)}>{pitch.ticker}</button></th><td>{dateLabel(pitch.date)}</td><td>{currency(pitch.pitchPrice)}</td><td>{currency(pitch.price)}</td><td>{pitch.shares.toFixed(6)}</td><td>{currency(pitch.cost)}</td><td>{currency(pitch.marketValue)}</td><td className={changeClass(pitch.gain)}>{currency(pitch.gain)}</td><td className={changeClass(pitch.return)}>{percent(pitch.return)}</td></tr>)}</tbody></table></div></section>}
-    <div className="portfolio-performance-status"><div className="portfolio-asof"><strong>{portfolio.lastSuccessfulAt ? 'End-of-day portfolio' : 'Workbook snapshot'}</strong><span>Updated {portfolio.updatedLabel}</span><span className="portfolio-refresh-status" aria-live="polite">{updateUnavailable || portfolio.refresh?.status === 'error' ? 'Latest update unavailable · retaining last values' : portfolio.refresh?.status === 'updating' ? 'Updating latest market close…' : portfolio.refresh?.nextRefreshAt ? `Next update ${new Date(portfolio.refresh.nextRefreshAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' })}` : 'Automatic updates after market close'}</span></div></div>
-    <p className="portfolio-source">Purchase dates, cost bases, share counts, and cash originate from {portfolio.source}. {portfolio.lastSuccessfulAt ? 'Closing prices and returns update 15 minutes after each trading session closes; holidays and early closes are included. Share counts adjust for subsequent stock splits.' : 'Showing the last available snapshot while the daily update is checked.'} Return history starts {dateLabel(portfolio.performance[0].date)}.</p>
+    <div className="portfolio-performance-status"><div className="portfolio-asof"><strong>{portfolio.refresh?.quoteStatus === 'live' ? 'Intraday portfolio' : portfolio.lastSuccessfulAt ? 'End-of-day portfolio' : 'Workbook snapshot'}</strong><span>Updated {portfolio.refresh?.quoteUpdatedAt ? new Date(portfolio.refresh.quoteUpdatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' }) : portfolio.updatedLabel}</span><span className="portfolio-refresh-status" aria-live="polite">{updateUnavailable || portfolio.refresh?.quoteStatus === 'error' || portfolio.refresh?.status === 'error' ? 'Latest update unavailable · retaining last values' : portfolio.refresh?.quoteStatus === 'closed' ? `Market closed · next check ${new Date(portfolio.refresh.nextQuoteRefreshAt ?? '').toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' })}` : portfolio.refresh?.nextQuoteRefreshAt ? `Next price update ${new Date(portfolio.refresh.nextQuoteRefreshAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' })}` : 'Prices update every 15 minutes during market hours'}</span></div></div>
+    <p className="portfolio-source">Purchase dates, cost bases, share counts, and cash originate from {portfolio.source}. Live prices update every 15 minutes during NYSE trading hours; daily history and risk metrics refresh after the close. Share counts adjust for subsequent stock splits. Return history starts {dateLabel(portfolio.performance[0].date)}.</p>
   </section>;
 }

@@ -17,6 +17,7 @@ import pandas_market_calendars as mcal
 import yfinance as yf
 
 from server.yahoo_profile import get_profile
+from server.quotes import get_quote
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = ROOT / 'src/data/portfolio.json'
@@ -28,6 +29,11 @@ _REFRESH_LOCK = threading.Lock()
 _ERROR = None
 _RETRY_AT = None
 _RUNNING = False
+_QUOTE_REFRESH_LOCK = threading.Lock()
+_QUOTE_SLOT = None
+_QUOTE_DATA = {}
+_QUOTE_UPDATED_AT = None
+_QUOTE_ERROR = None
 INDEX_SYMBOLS = {'NASDAQ': '^IXIC', 'S&P 500': '^GSPC', 'DOW JONES': '^DJI', 'RUSSEL 2000': '^RUT'}
 BETA_METHOD = '1y-daily-adjusted-sp500-v2'
 CLASSIFICATION_VERSION = 3
@@ -60,6 +66,49 @@ def refresh_window(now):
     _, ready, due = cached
     index = bisect_right(due, now)
     return ready[index - 1][0] if index else None, due[index] if index < len(due) else None
+
+
+QUOTE_INTERVAL = timedelta(minutes=15)
+
+
+def quote_window(now):
+    """Return the current NYSE session and its 15-minute quote slot, if open."""
+    now = now.astimezone(timezone.utc)
+    local_date = now.astimezone(EASTERN).date()
+    schedule = session_schedule(local_date.year)
+    matches = schedule.loc[schedule.index.date == local_date]
+    if matches.empty:
+        return None
+    row = matches.iloc[0]
+    opened = row['market_open'].to_pydatetime()
+    closed = row['market_close'].to_pydatetime()
+    if not opened <= now < closed:
+        return None
+    slot = int((now - opened) // QUOTE_INTERVAL)
+    return local_date.isoformat(), slot, opened, closed
+
+
+def next_quote_refresh(now):
+    """Next 15-minute quote poll during an NYSE session, or next session open."""
+    now = now.astimezone(timezone.utc)
+    local_date = now.astimezone(EASTERN).date()
+    schedule = session_schedule(local_date.year)
+    matches = schedule.loc[schedule.index.date == local_date]
+    if not matches.empty:
+        row = matches.iloc[0]
+        opened = row['market_open'].to_pydatetime()
+        closed = row['market_close'].to_pydatetime()
+        if now < opened:
+            return opened.isoformat()
+        if now < closed:
+            slot = int((now - opened) // QUOTE_INTERVAL)
+            upcoming = opened + (slot + 1) * QUOTE_INTERVAL
+            if upcoming < closed:
+                return upcoming.isoformat()
+    upcoming = schedule[schedule.index.date > local_date].head(1)
+    if upcoming.empty:
+        return None
+    return upcoming.iloc[0]['market_open'].to_pydatetime().isoformat()
 
 
 @lru_cache(maxsize=4)
@@ -312,11 +361,119 @@ def get_portfolio(now=None):
     seed, fingerprint = load_seed()
     document = dict(read_cache(fingerprint) or seed)
     _, next_refresh = refresh_window(now)
+    session = quote_window(now)
+    quote_error = None
+    if session:
+        global _QUOTE_SLOT, _QUOTE_DATA, _QUOTE_UPDATED_AT, _QUOTE_ERROR
+        day, slot, _, _ = session
+        slot_key = (day, slot)
+        if _QUOTE_SLOT != slot_key and _QUOTE_REFRESH_LOCK.acquire(blocking=False):
+            try:
+                if _QUOTE_SLOT != slot_key:
+                    symbols = ({item['ticker'] for item in seed['holdings']}
+                               | {pitch['ticker'] for partner in seed['partners'] for pitch in partner['pitches']}
+                               | {item['ticker'] for item in seed['marketPulse']}
+                               | set(INDEX_SYMBOLS.values()))
+                    with ThreadPoolExecutor(max_workers=8) as pool:
+                        futures = {symbol: pool.submit(get_quote, symbol) for symbol in sorted(symbols)}
+                        fetched, failures = {}, []
+                        for symbol, future in futures.items():
+                            try:
+                                quote = future.result()
+                                regular = quote.get('regular') or {}
+                                if (quote.get('currency') == 'USD' and regular.get('price')
+                                        and regular.get('time') and regular['time'][:10] == day):
+                                    fetched[symbol] = quote
+                                else:
+                                    failures.append(symbol)
+                            except Exception:
+                                failures.append(symbol)
+                    with _LOCK:
+                        _QUOTE_DATA = {**_QUOTE_DATA, **fetched}
+                        _QUOTE_SLOT = slot_key
+                        _QUOTE_UPDATED_AT = datetime.now(timezone.utc).isoformat() if fetched else _QUOTE_UPDATED_AT
+                        _QUOTE_ERROR = f'Quotes unavailable for {", ".join(failures)}' if failures else None
+            finally:
+                _QUOTE_REFRESH_LOCK.release()
+        with _LOCK:
+            quotes = dict(_QUOTE_DATA)
+            quote_error = _QUOTE_ERROR
+            quote_updated_at = _QUOTE_UPDATED_AT
+        apply_live_quotes(document, seed, quotes, day)
+    else:
+        with _LOCK:
+            quotes = dict(_QUOTE_DATA)
+            quote_updated_at = _QUOTE_UPDATED_AT
     with _LOCK:
         document['refresh'] = {'status': 'updating' if _RUNNING else 'error' if _ERROR else 'ready' if 'lastSuccessfulAt' in document else 'pending',
                                'error': _ERROR, 'retryAt': _RETRY_AT.isoformat() if _RETRY_AT else None,
-                               'nextRefreshAt': next_refresh.isoformat() if next_refresh else None}
+                               'nextRefreshAt': next_refresh.isoformat() if next_refresh else None,
+                               'nextQuoteRefreshAt': next_quote_refresh(now),
+                               'quoteStatus': 'closed' if not session else 'error' if quote_error else 'live' if quote_updated_at else 'pending',
+                               'quoteUpdatedAt': quote_updated_at, 'quoteError': quote_error}
     return document
+
+
+def apply_live_quotes(document, seed, quotes, session_day):
+    """Overlay current-session quotes on the latest completed daily snapshot."""
+    def quote_for(symbol):
+        quote = quotes.get(symbol) or {}
+        regular = quote.get('regular') or {}
+        return regular if regular.get('time', '')[:10] == session_day else None
+
+    for holding in document.get('holdings', []):
+        quote = quote_for(holding['ticker'])
+        if not quote:
+            continue
+        holding['price'] = quote['price']
+        holding['dayChange'] = (quote.get('percent') or 0) / 100
+        holding['marketValue'] = holding['price'] * holding['shares']
+        holding['gain'] = holding['marketValue'] - holding['cost']
+        holding['return'] = holding['gain'] / holding['cost'] if holding['cost'] else None
+
+    summary = document.get('summary', {})
+    summary['holdingsValue'] = sum(item['marketValue'] for item in document.get('holdings', []))
+    summary['portfolioValue'] = summary['holdingsValue'] + summary.get('cash', 0)
+    summary['totalCost'] = sum(item['cost'] for item in document.get('holdings', []))
+    summary['gain'] = summary['holdingsValue'] - summary['totalCost']
+    summary['portfolioReturn'] = summary['gain'] / summary['totalCost'] if summary['totalCost'] else 0
+    for holding in document.get('holdings', []):
+        holding['weight'] = holding['marketValue'] / summary['holdingsValue'] if summary['holdingsValue'] else 0
+    summary['beta'] = (sum(item['marketValue'] * item['beta'] for item in document['holdings']) / summary['portfolioValue']
+                       if summary['portfolioValue'] and all(item.get('beta') is not None for item in document['holdings']) else None)
+
+    base_summary = seed.get('summary', {})
+    base_index = next((item['price'] for item in seed.get('indexes', []) if item['name'] == 'S&P 500'), None)
+    live_sp = quote_for('^GSPC')
+    if live_sp and base_index:
+        summary['benchmarkReturn'] = (1 + base_summary.get('benchmarkReturn', 0)) * live_sp['price'] / base_index - 1
+        summary['relativeReturn'] = summary['portfolioReturn'] - summary['benchmarkReturn']
+        document['performance'] = [point for point in document.get('performance', []) if point['date'] < session_day]
+        document['performance'].append({'date': session_day, 'club': summary['portfolioReturn'],
+                                        'benchmark': summary['benchmarkReturn']})
+
+    for partner in document.get('partners', []):
+        for pitch in partner.get('pitches', []):
+            quote = quote_for(pitch['ticker'])
+            if not quote:
+                continue
+            pitch['price'] = quote['price']
+            pitch['marketValue'] = pitch['price'] * pitch['shares']
+            pitch['gain'] = pitch['marketValue'] - pitch['cost']
+            pitch['return'] = pitch['gain'] / pitch['cost'] if pitch['cost'] else 0
+        costs = sum(item['cost'] for item in partner.get('pitches', []))
+        partner['return'] = sum(item['gain'] for item in partner.get('pitches', [])) / costs if costs else 0
+    for pulse in document.get('marketPulse', []):
+        quote = quote_for(pulse['ticker'])
+        if quote:
+            pulse['dayChange'] = (quote.get('percent') or 0) / 100
+    for index in document.get('indexes', []):
+        quote = quote_for(INDEX_SYMBOLS[index['name']])
+        if quote:
+            index['price'] = quote['price']
+    document['asOf'] = session_day
+    document['updatedLabel'] = f'{datetime.fromisoformat(session_day).strftime("%b %d, %Y")} intraday'
+    document['priceSource'] = 'Yahoo Finance intraday quotes'
 
 
 def start_portfolio_scheduler():
