@@ -52,7 +52,7 @@ test('home company search selects the correct issuer and login opens without a s
     const benchmarkLabel = dashboard.querySelector('[data-testid="return-label-benchmark"]');
     assert.ok(Number(fundLabel.getAttribute('y')) < Number(fundLabel.parentNode.querySelector('circle').getAttribute('cy')));
     assert.ok(Number(benchmarkLabel.getAttribute('y')) > Number(benchmarkLabel.parentNode.querySelector('circle').getAttribute('cy')));
-    assert.equal(document.getElementById('portfolio-performance-title').textContent, 'Fairfax Investing Group “L/O” Fund vs. S&P 500');
+    assert.equal(document.getElementById('portfolio-performance-title').textContent, 'Fairfax Investing Group Select Opportunities Fund vs. S&P 500');
 
     assert.equal(dashboard.querySelectorAll('.portfolio-holdings tbody tr').length, 10);
     assert.match(dashboard.querySelector('.portfolio-summary').textContent, /\$13,525\.96/);
@@ -63,7 +63,7 @@ test('home company search selects the correct issuer and login opens without a s
     const expectedTickers = (key, descending) => [...portfolioData.holdings].sort((a, b) => (a[key] - b[key]) * (descending ? -1 : 1)).map(item => item.ticker);
     const shownTickers = () => holdingRows().map(row => row.querySelector('th').textContent);
     assert.deepEqual(shownTickers(), expectedTickers('gain', true));
-    const marketSort = [...dashboard.querySelectorAll('.portfolio-holdings thead button')].find(button => button.textContent.startsWith('Market value'));
+    const marketSort = [...dashboard.querySelectorAll('.portfolio-holdings thead button')].find(button => button.textContent.startsWith('Mkt Val'));
     await React.act(async () => marketSort.click());
     assert.deepEqual(shownTickers(), expectedTickers('marketValue', true));
     assert.equal(marketSort.querySelector('.portfolio-sort-arrows').textContent, '↓');

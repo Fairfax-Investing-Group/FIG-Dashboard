@@ -29,7 +29,81 @@ excluded years survive each update.
   finish, but discarded results cannot refill those caches. Release completed
   checkpoints, stream readers, and unused enrichment locks.
 
+## Browser preloading
+
+Search preload requests now accept NDJSON previews. Each preview streams the
+Fundamentals projection to the browser without saving a study or consuming its
+server-side inputs. Prepared pages receive the financial values and weekly
+prices before selection. They render offscreen at the final viewport width so
+chart layout can happen before the page is revealed.
+
+At most five browser payloads/readers are retained. They expire after 55 seconds
+(ahead of the server's 60-second TTL), and are aborted/cleared when selecting a
+study or clearing/leaving search. The selected page keeps its mounted component
+and existing edits while the normal creation request persists the document.
+Daily prices and full enrichment still start after selection.
+
+The original API-only timing samples below exclude browser rendering and do not
+measure this improvement's click-to-paint latency. Browser UI verification was
+not performed.
+
+## Persistent recent studies and portfolio warming
+
+Browser Cache Storage now retains provider-only study projections across reloads:
+up to 24 documents or 16 MiB, expiring after seven days. Four decoded studies stay
+in memory. Fresh memory hits (under five minutes) reopen without another study
+request. Disk reloads display cached data before background revalidation; a 404
+after a Render restart recreates the original ID from cached company identity.
+Failed revalidation retains cached data. Corrupt/expired entries and unavailable
+browser storage fall back to normal loading. Supabase inputs and sessions are
+not part of this cache.
+
+Populated cached views remain mounted while replacement data streams. Profile-only
+events cannot empty prepared pages. A full cached snapshot stays visible through
+Fundamentals readiness and daily/enrichment loading, then swaps to the completed
+response atomically. A Fundamentals-only preview is retained until the initial
+ready event. New studies without cached values still populate progressively;
+completed responses remain authoritative, including intentionally missing data.
+
+Entering home immediately queues every holding from the published snapshot index.
+Two low-priority CDN downloads run at a time, yielding to active search preloads;
+leaving home aborts active downloads and stops the remaining queue. Fresh disk
+entries skip repeat downloads. These portfolio entries are retained separately
+from short-lived search speculation, and warming cannot evict recent studies
+from memory. Selecting a company still requests fresh live data in parallel with
+displaying its cached values.
+
+Snapshot export also writes compact `.view.json` files using the same server
+projection as the live study API. The original ten checked-in snapshots total
+7,838,619 bytes; their compact views total 1,438,052 bytes (81.7% smaller before
+HTTP compression). Full export files remain available. New checks cover reloads,
+expiry, size/entry bounds, storage failures, company identity matching, Render-ID
+recovery, foreground priority, bounded portfolio concurrency, and cancellation.
+121 Python tests, 69 JavaScript tests, and the production build passed.
+
 ## Measurements
+
+The October 24 code reuse pass additionally:
+
+- Shares bounded Intl formatter caches across study tables, valuation, portfolio
+  tables, chart labels, and tooltips, retaining the original locale/options.
+- Prepares TTM financial values once for chart and current valuation. Memoizes
+  chart inputs, regressions, layout transforms, and tooltip metadata separately
+  from line visibility/drag offsets. Reuses valuation rows/averages on edits and
+  skips financial-table work when only a live quote changes.
+- Shares study POST/stream validation, identity extraction, and browser/server
+  preload cleanup. Identity lookup no longer converts an entire study document.
+- Indexes annual SEC candidates by end date and parses repeated dates once,
+  retaining concept precedence, restatement ordering, and stable tie handling.
+
+Local synthetic comparisons measured 10,000 formatted number cells at 246 ms
+before versus 10 ms after; a 3,900-fact annual normalization fixture averaged
+126 ms before versus 58 ms after over 20 runs. Old/new normalization outputs
+matched across 20 shuffled fixture orders. These CPU measurements are not
+end-to-end loading or browser paint timings and vary with machine/load.
+The full suite passed (120 Python and 65 JavaScript tests), followed by targeted
+checks for the final chart/formatter changes and a successful production build.
+CSS and rendered markup were preserved; no browser UI verification was performed.
 
 Local backend measurements used AAPL, MSFT, and NVDA with peers disabled on both
 runs. Times include live providers, vary between requests, and are not browser

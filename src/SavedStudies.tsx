@@ -16,7 +16,15 @@ export default function SavedStudies({ onOpen }: { onOpen: (study: SavedStudy) =
     let active = true;
     setError(null);
     repository.list().then(rows => { if (active) setResult(rows ?? []); })
-      .catch(() => { if (active) setError('Saved studies could not be loaded. Check the Supabase study migrations and try again.'); });
+      .catch(cause => {
+        if (!active) return;
+        const detail = cause && typeof cause === 'object' && 'message' in cause ? String(cause.message) : '';
+        setError(/not configured/i.test(detail)
+          ? 'Saved studies are not configured for this site. Add the Supabase settings to the frontend build and redeploy.'
+          : /schema cache|does not exist|study_made_at/i.test(detail)
+            ? 'Saved studies need a database update. Apply the Supabase study migrations and retry.'
+            : 'Saved studies could not be loaded. Please try again.');
+      });
     return () => { active = false; };
   }, [retry]);
   const generation = useRef(0);

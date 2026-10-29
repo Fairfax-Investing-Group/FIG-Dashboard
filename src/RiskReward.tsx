@@ -1,3 +1,4 @@
+import { formatNumber, numberFormatter } from './lib/format';
 import { useState, type ReactNode } from 'react';
 import type { Study } from './types';
 import { currentValuation, valuationAverage, type ValuationRow } from './valuationMath';
@@ -5,7 +6,7 @@ import { draftFromValues, draftToValues, defaults, type Draft } from './lib/valu
 import { useStudyInputs, useStudyInputSection, useStudyReadOnly } from './StudyInputsContext';
 import { assumption, riskReward, type LowPriceMethod, type ZoneSplit } from './riskRewardMath';
 
-const number = (value: number | null, digits = 2) => value === null ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+const number = formatNumber;
 const percent = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
 const sourceInput = (value: string | null, source: number | null) => value ?? (source === null ? '' : String(source));
 function Summary({ title, children }: { title: string; children: ReactNode }) {
@@ -21,8 +22,9 @@ function PEReferences({ kind, five, ten, selected, onSelect }: { kind: 'high' | 
   })}</>;
 }
 
-export default function RiskReward({ study, current, history, highEPSForecast, epsForecastRate, onEditEPSForecast }: {
+export default function RiskReward({ study, current, history, averages, highEPSForecast, epsForecastRate, onEditEPSForecast }: {
   study: Study; current: ReturnType<typeof currentValuation>; history: ValuationRow[];
+  averages: readonly [ReturnType<typeof valuationAverage>, ReturnType<typeof valuationAverage>];
   highEPSForecast: number | null; epsForecastRate: string; onEditEPSForecast: () => void;
 }) {
   const inputs = useStudyInputs();
@@ -30,14 +32,13 @@ export default function RiskReward({ study, current, history, highEPSForecast, e
   const [draft, setDraft] = useState<Draft>(() => draftFromValues(inputs?.initial));
   useStudyInputSection('valuation', draftToValues(draft));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(previous => ({ ...previous, [key]: value }));
-  const five = valuationAverage(history, 5);
-  const ten = valuationAverage(history, 10);
+  const [five, ten] = averages;
   const averageInput = (value: number | null) => value === null ? '' : value.toFixed(2);
   const highPEInput = draft.highPEYears === null ? draft.highPE : averageInput((draft.highPEYears === 5 ? five : ten).highPE);
   const lowPEInput = draft.lowPEYears === null ? draft.lowPE : averageInput((draft.lowPEYears === 5 ? five : ten).lowPE);
   const compatible = Boolean(study.priceCurrency && study.priceCurrency === study.financialCurrency);
   const currency = study.priceCurrency ?? '';
-  const money = (value: number | null) => value === null ? '—' : study.priceCurrency ? new Intl.NumberFormat('en-US', { style: 'currency', currency: study.priceCurrency, currencyDisplay: 'narrowSymbol' }).format(value) : number(value);
+  const money = (value: number | null) => value === null ? '—' : study.priceCurrency ? numberFormatter({ style: 'currency', currency: study.priceCurrency, currencyDisplay: 'narrowSymbol' }).format(value) : number(value);
   const dividendInput = sourceInput(draft.dividend, five.dividend);
   const payoutInput = sourceInput(draft.payout, five.payout ?? current.payout);
   const highYieldInput = sourceInput(draft.highYield, five.highYield);

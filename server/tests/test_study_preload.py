@@ -22,6 +22,38 @@ class StudyPreloadTests(unittest.TestCase):
     def inputs(self):
         return {'sec': deepcopy(self.fixture.financials), 'yfinance': deepcopy(self.fixture.weekly)}, {}
 
+    def test_discard_wakes_a_browser_preview_waiter(self):
+        job = study_preload.Preload(self.company)
+        job.publish({'Study': {'StudyID': 'preview'}})
+        observed = threading.Event()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(job.preview, lambda document: observed.set())
+            try:
+                self.assertTrue(observed.wait(2))
+                job.discard()
+                with self.assertRaisesRegex(RuntimeError, 'discarded'):
+                    future.result(timeout=2)
+            finally:
+                job.discard()
+
+    def test_preview_leaves_inputs_available_for_selected_creation(self):
+        job = study_preload.Preload(self.company)
+        original = {'Study': {'StudyID': 'preview-id'}, 'AnnualData': [{'Sales': 123}]}
+        job.latest = original
+        job.version = 1
+        job.done = True
+        job.result = self.inputs()
+        result = job.result
+        seen = []
+        self.assertIs(job.preview(seen.append), original)
+        self.assertEqual(seen, [original])
+        self.assertIs(job.result, result)
+        selected = []
+        self.assertIs(job.consume(self.study_id, '2026-10-24T00:00:00Z', selected.append), result)
+        self.assertEqual(selected[0]['Study']['StudyID'], self.study_id)
+        self.assertEqual(original['Study']['StudyID'], 'preview-id')
+        self.assertIsNone(job.result)
+
     def test_finished_preload_is_unsaved_and_consumed_once_with_the_selected_study_id(self):
         with patch('server.studies.progressive_inputs', return_value=self.inputs()) as fetch:
             self.assertTrue(study_preload.start_preload(self.company))

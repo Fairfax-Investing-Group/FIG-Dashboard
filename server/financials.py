@@ -62,12 +62,26 @@ def normalize_financials(payload: dict, today: date | None = None) -> dict:
     candidates = {metric: annual_facts(payload, metric, today) for metric in CONCEPTS}
     # Use the most recent annual reporting currency, never a mixture of currencies.
     all_facts = [item for facts in candidates.values() for item in facts]
-    currency_facts = sorted(all_facts, key=lambda item: (item['end'], -item['priority'], item['filed']), reverse=True)
-    currency = currency_facts[0]['unit'].split('/')[0] if currency_facts else None
+    latest = max(all_facts, key=lambda item: (item['end'], -item['priority'], item['filed']), default=None)
+    currency = latest['unit'].split('/')[0] if latest else None
     currencies = {item['unit'].split('/')[0] for item in all_facts}
     for metric in candidates:
         unit = f'{currency}/shares' if metric == 'eps' else currency
         candidates[metric] = [item for item in candidates[metric] if item['unit'] == unit]
+
+    # Parse each date once and index facts by period end, instead of repeatedly
+    # scanning and sorting all historical restatements for every displayed year.
+    ordinals = {}
+    def ordinal(value):
+        if value not in ordinals:
+            ordinals[value] = date.fromisoformat(value).toordinal()
+        return ordinals[value]
+    indexed = {}
+    for metric, facts in candidates.items():
+        by_end = indexed[metric] = {}
+        for index, item in enumerate(facts):
+            rank = (item['formPriority'], item['priority'], -ordinal(item['filed']), -ordinal(item['start']), index)
+            by_end.setdefault(ordinal(item['end']), []).append((rank, item))
 
     anchor = [item for facts in candidates.values() for item in facts]
     # Use actual period ends. SEC's `fy` describes the filing, including its comparatives.
@@ -76,7 +90,7 @@ def normalize_financials(payload: dict, today: date | None = None) -> dict:
     periods = []
     for end in ends:
         # Collapse small date shifts and avoid two full-year periods from the same fiscal cycle.
-        if periods and (date.fromisoformat(periods[-1]) - date.fromisoformat(end)).days < 300:
+        if periods and ordinal(periods[-1]) - ordinal(end) < 300:
             continue
         periods.append(end)
         if len(periods) == 10:
@@ -85,11 +99,12 @@ def normalize_financials(payload: dict, today: date | None = None) -> dict:
     rows = []
     for end in reversed(periods):
         row = {'periodEnd': end}
-        for metric, facts in candidates.items():
-            matching = [item for item in facts if abs((date.fromisoformat(item['end']) - date.fromisoformat(end)).days) <= 7]
+        end_day = ordinal(end)
+        for metric, by_end in indexed.items():
+            matching = (entry for day in range(end_day - 7, end_day + 8) for entry in by_end.get(day, ()))
             # Prefer concept semantics; within that concept select the newest restatement.
-            matching.sort(key=lambda item: (item['formPriority'], item['priority'], -date.fromisoformat(item['filed']).toordinal(), -date.fromisoformat(item['start']).toordinal()))
-            chosen = matching[0] if matching else None
+            selected = min(matching, key=lambda entry: entry[0], default=None)
+            chosen = selected[1] if selected else None
             row[metric] = chosen['value'] if chosen else None
             row[f'{metric}Source'] = {k: chosen[k] for k in ('concept', 'filed', 'accession', 'unit', 'start', 'end', 'form')} if chosen else None
         rows.append(row)

@@ -24,12 +24,26 @@ npm run dev
 
 The default identifies this local research app. SEC may block requests without adequate contact identification or rate-limit an IP; the UI reports upstream failures and lets you retry. No API keys are required for SEC/Yahoo financial requests. Supabase login uses the public project settings described below. Set `API_PORT` to use another backend port; the Vite proxy uses the same value.
 
+## Hosted live study generation
+
+GitHub Pages cannot run the Python study API. Deploy the included backend
+Docker image as a web service, configure `STUDY_ALLOWED_ORIGINS` on that service,
+and set the repository Actions variable `VITE_STUDY_API_URL` to its HTTPS origin.
+Redeploy Pages to include that value. See [hosting setup](docs/hosting.md) for
+exact steps. Supabase settings alone cannot enable live SEC/Yahoo study pulls.
+
 ## Supabase login and saved studies
 
 The homepage and `#/login` support Supabase email/password authentication,
 session restoration, and logout. Set `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local` (see `.env.example`). Apply
 `supabase/migrations/202610240001_user_studies.sql` in your project's SQL Editor.
+
+GitHub Pages builds use the connected project's public URL and publishable key
+by default. To override them, set the same `VITE_SUPABASE_*` names in GitHub
+Actions repository variables or secrets, then redeploy. Render environment
+settings do not configure the separately built Pages frontend. Never use a
+service-role or secret Supabase key in the frontend.
 
 Apply the remaining migrations in order: `202610240002_study_made_at.sql` and
 `202610240003_public_study_reads.sql`.
@@ -53,9 +67,12 @@ See [Supabase setup and storage contract](docs/supabase.md).
 - A Fundamental Company Data table underneath the combined chart, with fiscal years across columns and sales, split-normalized EPS, and pre-tax profit in rows. Sales and profit are shown in millions. Historical values link to SEC filings; hover a year for its fiscal end date. Sales, EPS, and pre-tax profit growth use least-squares linear regression of ln(value) against fiscal year, converted to annual percentage growth as 100 × (exp(slope) − 1). At least two distinct fiscal years are required. Missing values are skipped while retaining year gaps; any zero or negative observation makes the metric’s growth unavailable. Blank sales/EPS forecast inputs accept annual percentage assumptions and calculate five-year estimates from the latest available value; forecasts are local to the open study view.
 - Source retrieval timestamps, missing-data notices, and retry/refresh controls.
 
-Each creation/refresh makes new upstream requests and saves a separate snapshot in `.data/studies.sqlite3` (ignored by Git). Reloading a study's `#/study/<id>` URL reads that snapshot rather than silently fetching new data. Refresh creates and opens a new snapshot. These local URLs work while this backend and its database are available; snapshots are not cloud-shared. Set `STUDY_DB` to change the database path.
+Each creation/refresh makes new upstream requests and saves a separate snapshot in `.data/studies.sqlite3` (ignored by Git). Reloading a study's `#/study/<id>` URL shows its browser-cached snapshot first, then revalidates against the backend snapshot. If Render has lost the ID after a restart, cached company identity lets the app recreate it in the background. Refresh creates and opens a new snapshot. These local URLs work while this backend and its database are available; snapshots are not cloud-shared. Set `STUDY_DB` to change the database path.
 
-Search starts the first match's speculative request immediately and the next four after 500 ms without typing. After 25 ms without typing, the closest match's Fundamentals page also mounts hidden with its known identity and live quote. Once that page mounts, a 500 ms timer prepares the next four matches' pages. Selecting any prepared match reveals its mounted page and removes all other prepared pages. Changing or clearing the search cancels pending page preparation. Selecting a company reuses its work and discards the other selections. The browser receives a slim study projection; complete data remains available through the default API and export. See [loading implementation and measured results](docs/loading-performance.md).
+Search starts the first match's speculative request and prepares its Fundamentals page immediately, without a typing delay. The next four data preloads start 500 ms after the first match's preload finishes successfully. Its page mounts offscreen at the final page width. Streamed preload previews fill its financial tables and weekly chart before selection, alongside the live quote. Once that page mounts, a 500 ms timer prepares the next four matches' pages. Selecting any prepared match reveals its mounted page and removes all other prepared pages. Typing preserves in-flight preloads and preparation timers while the best match stays the same. Changing the best match or clearing/leaving search cancels pending scheduling; secondary timers use the latest matching companies. Selecting a company reuses its work and discards the other selections. The browser receives a slim study projection; complete data remains available through the default API and export. See [loading implementation and measured results](docs/loading-performance.md).
+
+Recent provider data is cached locally across reloads: four decoded studies in memory, up to 24 documents / 16 MiB on disk, and a seven-day expiry. Fresh memory entries reopen without a study request for five minutes; selecting a company still refreshes live data. User-entered values remain in Supabase, outside this cache. On entering home, every portfolio snapshot starts warming through a two-worker, low-priority CDN queue. Search has priority and navigation cancels remaining warming. Compact `.view.json` files preload chart/table inputs; full files remain available for export.
+
 
 ## Normalized study JSON
 

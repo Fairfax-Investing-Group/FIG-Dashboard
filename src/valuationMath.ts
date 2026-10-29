@@ -1,5 +1,5 @@
 import type { AnnualRow, MarketQuote, Study } from './types';
-import { trailingFinancials } from './trailingFinancials';
+import { studyTrailingFinancials } from './trailingFinancials';
 import { FIRST_HISTORY_YEAR, reportingYear, reportingYearOffset } from './reportingYears';
 
 export type ValuationRow = {
@@ -41,14 +41,11 @@ export function valuationAverage(rows: ValuationRow[], years: number): Omit<Valu
   return { high: mean('high'), low: mean('low'), eps: mean('eps'), highPE: mean('highPE'), lowPE: mean('lowPE'), dividend: mean('dividend'), payout: mean('payout'), highYield: mean('highYield') };
 }
 
-export function currentValuation(study: Study, annual: AnnualRow[], quote: MarketQuote | null) {
+export function currentValuation(study: Study, annual: AnnualRow[], quote: MarketQuote | null, trailingRows = studyTrailingFinancials(study, annual)) {
   const compatible = Boolean(study.priceCurrency && study.priceCurrency === study.financialCurrency);
   const live = quote?.currency === study.priceCurrency ? quote : null;
-  const normalizedQuarters = (study.quarterly ?? []).map(row => ({ ...row,
-    eps: study.epsAdjustment?.status === 'normalized' && row.epsSplitFactor != null && row.epsSplitFactor > 0 ? row.eps : null,
-  }));
   const lastAnnual = [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).at(-1);
-  const trailing = trailingFinancials(annual, normalizedQuarters).filter(row => lastAnnual && row.periodEnd > lastAnnual.periodEnd).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).at(-1);
+  const trailing = trailingRows.filter(row => lastAnnual && row.periodEnd > lastAnnual.periodEnd).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).at(-1);
   const eps = compatible && live?.trailingEPS != null ? finiteValue(live.trailingEPS) : trailing ? finiteValue(trailing.eps) : finiteValue(lastAnnual?.eps);
   const dividend = finiteValue(trailing ? trailing.dividendPerShare : lastAnnual?.dividendPerShare) ?? finiteValue(study.overview?.Dividend);
   const high = finiteValue(study.overview?.HighPriceTtm), low = finiteValue(study.overview?.LowPriceTtm);

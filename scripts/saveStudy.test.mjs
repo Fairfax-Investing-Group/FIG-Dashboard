@@ -118,6 +118,15 @@ test('save and reopen preserve explicit forecasts, exclusions, zero overrides, d
     assert.equal(writes.length, 3, 'Logged-out users cannot write studies');
     await click('Log in to save');
     assert.ok(document.querySelector('.study-save-login form'), 'Login is available without leaving the draft');
+    for (const [message, expected] of [
+      ['Study storage is not configured.', /frontend build and redeploy/],
+      ["Could not find the table in the schema cache", /database update/],
+      ['Failed to fetch', /Please try again/],
+    ]) {
+      globalThis.studyRepository.list = async () => { throw new Error(message); };
+      await React.act(async () => root.render(React.createElement(SavedStudies, { key: message, onOpen() {} })));
+      assert.match(document.querySelector('[role="alert"]').textContent, expected);
+    }
   } finally {
     if (root) { const React = await import('react'); await React.act(async () => root.unmount()); }
     globalThis.fetch = originalFetch;

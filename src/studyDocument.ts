@@ -1,5 +1,10 @@
 import type { AnnualRow, FactSource, Source, Study, StudyDocument } from './types';
 
+export const studyCompany = (document: StudyDocument): Study['company'] => ({
+  ticker: document.Company.Ticker, name: document.Company.CompanyName,
+  cik: Number(document.Company.CentralIndexKey), exchange: document.Company.ExchangeType,
+});
+
 /** Adapt the canonical document to chart/table units in one place. */
 export function studyView(document: StudyDocument): Study {
   if (document.SchemaVersion !== 1) throw new Error('Unsupported study data version. Restart the backend and refresh.');
@@ -32,7 +37,7 @@ export function studyView(document: StudyDocument): Study {
   });
   return {
     id: document.Study.StudyID, createdAt: document.Study.DateCreated,
-    company: { ticker: document.Company.Ticker, name: document.Company.CompanyName, cik: Number(document.Company.CentralIndexKey), exchange: document.Company.ExchangeType },
+    company: studyCompany(document),
     overview: document.Company,
     financialCurrency: document.Metadata.FinancialCurrency, priceCurrency: document.Metadata.PriceCurrency,
     annual: document.AnnualData.map(financialRow),

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from server.company_directory import company_for
 from server.studies import create_study
+from server.fundamentals_view import study_view
 
 PORTFOLIO = ROOT / 'public' / 'portfolio-current.json'
 STUDY_DIR = ROOT / 'public' / 'studies'
@@ -34,6 +35,16 @@ def atomic_json(path: Path, value: object) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def write_snapshot_views(entries):
+    for entry in entries:
+        # Warm only chart/table inputs in browsers; keep full files for export.
+        document = json.loads((ROOT / 'public' / entry['file']).read_text(encoding='utf-8'))
+        preview = study_view(document)
+        preview['Metadata']['StaticSnapshot'] = True
+        entry['viewFile'] = entry['file'].removesuffix('.json') + '.view.json'
+        atomic_json(ROOT / 'public' / entry['viewFile'], preview)
 
 
 def main() -> None:
@@ -84,6 +95,7 @@ def main() -> None:
 
     if not entries:
         raise RuntimeError('No portfolio study snapshots are available; refusing to publish an empty index.')
+    write_snapshot_views(entries)
     atomic_json(INDEX, {
         'generatedAt': datetime.now(timezone.utc).isoformat(),
         'portfolioAsOf': portfolio.get('asOf'),
