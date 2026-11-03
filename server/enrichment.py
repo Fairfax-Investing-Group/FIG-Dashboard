@@ -4,6 +4,7 @@ import math
 
 from server.study_schema import finite, growth_rate
 from server.schema_fields import ANNUAL_FIELDS, COMPANY_FIELDS, AVERAGE_FIELDS
+from server.share_counts import normalize_share_counts
 
 PER_SHARE = {'EPS', 'Dividend', 'BookValue', 'CashFlow', 'HighPrice', 'LowPrice'}
 RATIOS = {'PtpOnSales', 'ROE', 'DTC', 'TaxRate', 'Payout', 'CurrentRatio', 'QuickRatio', 'InterestCoverage', 'HighPE', 'LowPE'}
@@ -149,7 +150,8 @@ def enrich_company(document, profile, annual, quarterly):
 def apply_enrichment(document, data):
     history = data.get('priceHistory', [])
     currency, price_currency = document['Metadata']['FinancialCurrency'], document['Metadata']['PriceCurrency']
-    rich = data.get('statements') or {}
+    rich, share_notices = normalize_share_counts(data.get('statements') or {})
+    document['Metadata']['Warnings'].extend(share_notices)
     market = data.get('market') or {}
     fallback_periods = market.get('statementFallbacks', {})
     period_ends = sorted(set(fallback_periods.get('quarterly', {})) | {row['AsOfDataDate'] for row in document['AnnualData']} |

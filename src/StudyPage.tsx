@@ -566,7 +566,6 @@ function StudyPageContent({ study, onBack, onRefresh, staticSnapshot = false, on
     return [...annual].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).filter(row => row.eps !== null && !isValueExcluded(controls, 'eps', reportingYear(row, offset))).at(-1)?.eps ?? null;
   }, [annual, controls]);
   const highEPSForecast = fiveYearEstimate(latestEPS, forecasts.eps);
-  const errors = Object.values(study.sources).map(source => source.error).filter(Boolean);
   return <main className="study-page" aria-busy={fundamentalsStatus === 'loading'}>
     <nav className="study-nav" aria-label="Study navigation"><button className="back-button" onClick={onBack}>← Company search</button><div className="study-tabs" role="tablist" aria-label="Study sections">{tabs.map(item => <button key={item.key} id={`tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls={`panel-${item.key}`} tabIndex={tab === item.key ? 0 : -1} onClick={() => setTab(item.key)} onKeyDown={event => {
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -580,8 +579,6 @@ function StudyPageContent({ study, onBack, onRefresh, staticSnapshot = false, on
     <CompanyHeader study={study} quote={quote} quoteStatus={quoteStatus} pending={pending}/>
     {fundamentalsStatus === 'error' && <aside className="study-background-status" role="alert">{fundamentalsError ?? 'Financial data could not be loaded.'} <button type="button" className="text-button" onClick={onRetryFundamentals}>Retry</button></aside>}
     {detailsStatus === 'error' && <aside className="study-background-status" role="alert">Additional study data could not be loaded. Your fundamentals remain available. <button type="button" className="text-button" onClick={onRetryDetails}>Retry</button></aside>}
-    {(errors.length > 0 || study.warnings.length > 0) && <aside className="data-notice" aria-label="Data availability"><strong>Data availability</strong><ul>{[...errors, ...study.warnings].map((warning, i) => <li key={i}>{warning}</li>)}</ul>{errors.length > 0 && !staticSnapshot && <button className="text-button" onClick={refresh}>Retry both sources</button>}</aside>}
-    {!pending && !study.epsAdjustment && <aside className="data-notice">Split-normalized EPS is unavailable in this saved study.{staticSnapshot ? ' A live refresh requires a study API.' : <> <button className="text-button" onClick={refresh}>Refresh study to normalize EPS</button>.</>}</aside>}
     <div id="panel-fundamentals" role="tabpanel" aria-labelledby="tab-fundamentals" hidden={tab !== 'fundamentals'}>
       <OverlayChart key={`chart-${study.id}`} annual={annual} study={study} trailing={trailing} pending={pending} excludedYears={excludedYears} onToggleYear={toggleYear} onRestoreYears={restoreYears} excludedValues={excludedValues} onResetExclusions={resetExclusions}/>
       <FinancialTable key={`financials-${study.id}`} annual={annual} study={study} controls={controls} pending={pending} forecasts={forecasts} onForecastChange={updateForecast}/>

@@ -78,7 +78,7 @@ def fiscal_period(end, fiscal_month):
     return year, quarter
 
 
-FUNDAMENTALS_FIELDS = {'Sales', 'EPS', 'PTP', 'NetIncome', 'SharesOut', 'OperatingCashFlow',
+FUNDAMENTALS_FIELDS = {'Sales', 'EPS', 'PTP', 'NetIncome', 'SharesOut', 'BasicShares', 'PrefDiv', 'OperatingCashFlow',
                        'CapitalExpenditures', 'CommonStockEquity', 'EndShares', 'LtDebt'}
 
 

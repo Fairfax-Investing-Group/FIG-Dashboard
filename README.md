@@ -90,6 +90,8 @@ EPS is **split-normalized diluted EPS** in both the chart and table. The yfinanc
 
 ## Checks and production
 
+Weighted-average share counts are checked after split normalization against same-period common earnings / diluted EPS. A thousand-unit correction (×1,000 or ÷1,000) requires agreement within 2% plus corroboration from period-end shares or an independently validated nearby period (within 35%). Annual corroboration spans at most 800 days; quarterly corroboration spans 200 days. Corrections never chain through inferred values alone. Original counts, factors, estimates and supporting sources remain in `Sources.SharesOut.ShareCountCheck`, and study warnings identify corrections. Suspected scaling errors without corroboration are withheld from FCF/share. Existing snapshots retain their saved values; refresh the study to apply the checker.
+
 ```sh
 npm test
 npm run build
