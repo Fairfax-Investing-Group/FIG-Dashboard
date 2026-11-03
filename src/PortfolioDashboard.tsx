@@ -106,7 +106,7 @@ function LatestReturnLabels({ data }: { data: ReturnPoint[] }) {
     const box = chosen[index];
     return <g key={label.key}>
       <circle cx={endpointX} cy={endpointYs[index]} r={3} fill={label.color} stroke="#fff" strokeWidth={1}/>
-      <rect x={box.x} y={box.y} width={width} height={height} rx={3} fill="#fff" stroke={label.color} strokeOpacity={0.28}/>
+      <rect x={box.x} y={box.y} width={width} height={height} rx={3} fill="#fff"/>
       <text x={box.x + 6} y={box.y + height / 2} textAnchor="start" dominantBaseline="middle" fill={label.color} fontSize={10} fontWeight={600} data-testid={`return-label-${label.key}`}>{label.title}: {percent(label.value)}</text>
     </g>;
   })}</g>;
@@ -125,19 +125,23 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
       controller?.abort();
       controller = new AbortController();
       try {
-        let data: Portfolio | null = null;
-        for (const source of ['/api/portfolio', '/portfolio-current.json']) {
+        const candidates = await Promise.all(['/api/portfolio', '/portfolio-current.json'].map(async source => {
           try {
             const response = await fetch(source.startsWith('/api/') ? apiUrl(source) : source, { signal: controller.signal, cache: 'no-store' });
-            if (!response.ok) continue;
+            if (!response.ok) return null;
             const candidate = await response.json() as Portfolio;
-            if (!Array.isArray(candidate.holdings) || !Array.isArray(candidate.performance) || typeof candidate.summary?.portfolioValue !== 'number') continue;
-            data = candidate;
-            break;
+            if (typeof candidate.asOf !== 'string' || !Array.isArray(candidate.holdings) || !Array.isArray(candidate.performance) || typeof candidate.summary?.portfolioValue !== 'number') return null;
+            return candidate;
           } catch (sourceError) {
             if (sourceError instanceof DOMException && sourceError.name === 'AbortError') throw sourceError;
+            return null;
           }
-        }
+        }));
+        const freshness = (candidate: Portfolio) => candidate.refresh?.quoteStatus === 'live' && candidate.refresh.quoteUpdatedAt
+          ? candidate.refresh.quoteUpdatedAt
+          : candidate.lastSuccessfulAt ?? `${candidate.asOf}T00:00:00.000Z`;
+        const data = candidates.filter((candidate): candidate is Portfolio => candidate !== null)
+          .sort((left, right) => freshness(right).localeCompare(freshness(left)))[0] ?? null;
         if (!data) throw new Error('Portfolio unavailable');
         if (active) {
           setPortfolio(data);
