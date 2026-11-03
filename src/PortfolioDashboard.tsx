@@ -1,6 +1,6 @@
 import { numberFormatter, formatNumber, formatDate, calendarDate, marketDate } from './lib/format';
 import { useEffect, useMemo, useState } from 'react';
-import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, usePlotArea, useYAxisScale } from 'recharts';
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, usePlotArea, useXAxisScale, useYAxisScale } from 'recharts';
 import initialPortfolio from './data/portfolio.json';
 import PortfolioAllocation from './PortfolioAllocation';
 import { portfolioDayChange, portfolioSharpe, portfolioRiskMetrics } from './portfolioMath';
@@ -41,27 +41,75 @@ function Sparkline({ history, name, stretch = false }: { history: History; name:
   return <svg className="portfolio-sparkline" preserveAspectRatio={stretch ? 'none' : 'xMidYMid meet'} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${name} price history, ${dateLabel(history[0].date)} to ${dateLabel(history.at(-1)!.date)}`}><title>{name}: {currency(history[0].value)} to {currency(history.at(-1)!.value)}</title><path d={path} fill="none" stroke="#527da7" strokeWidth="1.4" strokeLinejoin="round"/></svg>;
 }
 
-function LatestReturnLabels({ point }: { point?: { club: number; benchmark: number } }) {
+type ReturnPoint = { date: string; club: number; benchmark: number };
+type LabelBox = { x: number; y: number; collisions: number; distance: number };
+
+function segmentIntersectsBox(segment: [number, number, number, number], box: { x: number; y: number; width: number; height: number }) {
+  const [x1, y1, x2, y2] = segment;
+  const dx = x2 - x1, dy = y2 - y1;
+  let lower = 0, upper = 1;
+  for (const [p, q] of [[-dx, x1 - box.x], [dx, box.x + box.width - x1], [-dy, y1 - box.y], [dy, box.y + box.height - y1]]) {
+    if (p === 0) { if (q < 0) return false; continue; }
+    const ratio = q / p;
+    if (p < 0) lower = Math.max(lower, ratio);
+    else upper = Math.min(upper, ratio);
+    if (lower > upper) return false;
+  }
+  return true;
+}
+
+function LatestReturnLabels({ data }: { data: ReturnPoint[] }) {
   const area = usePlotArea();
-  const scale = useYAxisScale();
-  if (!area || !scale || !point) return null;
+  const xScale = useXAxisScale();
+  const yScale = useYAxisScale();
+  if (!area || !xScale || !yScale || !data.length) return null;
   const labels = [
-    { key: 'club', title: 'Fund return', value: point.club, color: '#234d76' },
-    { key: 'benchmark', title: 'S&P return', value: point.benchmark, color: '#518168' },
-  ].map(label => ({ ...label, anchorY: Number(scale(label.value)), y: Number(scale(label.value)) }));
-  if (labels.some(label => !Number.isFinite(label.y))) return null;
-  const top = area.y + 12, bottom = area.y + area.height - 12;
-  const lowestEndpoint = Math.max(...labels.map(label => label.anchorY));
-  const highestEndpoint = Math.min(...labels.map(label => label.anchorY));
-  labels[0].y = Math.max(top, Math.min(bottom, highestEndpoint - 22));
-  labels[1].y = Math.max(top, Math.min(bottom, lowestEndpoint + 38));
-  const x = area.x + area.width;
-  return <g className="portfolio-latest-labels" aria-label="Latest cumulative returns" style={{ pointerEvents: 'none' }}>{labels.map(label => <g key={label.key}>
-    <circle cx={x} cy={label.anchorY} r={3} fill={label.color} stroke="#fff" strokeWidth={1}/>
-    <path d={`M${x + 4},${label.anchorY} L${x + 10},${label.y}`} stroke={label.color} strokeWidth={1} fill="none"/>
-    <rect x={x + 10} y={label.y - 9} width={132} height={18} rx={3} fill="#fff"/>
-    <text x={x + 16} y={label.y} textAnchor="start" dominantBaseline="middle" fill={label.color} fontSize={10} fontWeight={600} data-testid={`return-label-${label.key}`}>{label.title}: {percent(label.value)}</text>
-  </g>)}</g>;
+    { key: 'club', title: 'Fund return', value: data.at(-1)!.club, color: '#234d76' },
+    { key: 'benchmark', title: 'S&P return', value: data.at(-1)!.benchmark, color: '#518168' },
+  ];
+  const segments = data.slice(1).flatMap((point, index) => {
+    const previous = data[index];
+    return [
+      [xScale(previous.date), yScale(previous.club), xScale(point.date), yScale(point.club)],
+      [xScale(previous.date), yScale(previous.benchmark), xScale(point.date), yScale(point.benchmark)],
+    ].map(values => values.map(Number) as [number, number, number, number]);
+  }).filter(segment => segment.every(Number.isFinite));
+  const width = 132, height = 18, inset = 6, stepX = 16, stepY = 12;
+  if (area.width < width || area.height < height) return null;
+  const endpointX = Number(xScale(data.at(-1)!.date));
+  const endpointYs = labels.map(label => Number(yScale(label.value)));
+  if (!Number.isFinite(endpointX) || endpointYs.some(value => !Number.isFinite(value))) return null;
+
+  const candidates: LabelBox[] = [];
+  for (let y = area.y + inset; y <= area.y + area.height - height - inset; y += stepY) {
+    for (let x = area.x + inset; x <= area.x + area.width - width - inset; x += stepX) {
+      const box = { x: x - 4, y: y - 4, width: width + 8, height: height + 8 };
+      const collisions = segments.reduce((count, segment) => count + Number(segmentIntersectsBox(segment, box)), 0);
+      candidates.push({ x, y, collisions, distance: 0 });
+    }
+  }
+  if (!candidates.length) return null;
+  const placements = labels.map((_, index) => candidates.map(candidate => ({ ...candidate,
+    distance: Math.hypot((candidate.x + width / 2 - endpointX) / area.width,
+      (candidate.y + height / 2 - endpointYs[index]) / area.height),
+  })));
+  let best: { fund: LabelBox; benchmark: LabelBox; score: number } | undefined;
+  for (const fund of placements[0]) for (const benchmark of placements[1]) {
+    const separated = fund.x + width + inset <= benchmark.x || benchmark.x + width + inset <= fund.x ||
+      fund.y + height + inset <= benchmark.y || benchmark.y + height + inset <= fund.y;
+    if (!separated) continue;
+    const score = (fund.collisions + benchmark.collisions) * 1000 + fund.distance + benchmark.distance;
+    if (!best || score < best.score) best = { fund, benchmark, score };
+  }
+  const chosen = best ? [best.fund, best.benchmark] : placements.map(options => options.reduce((current, candidate) => candidate.collisions < current.collisions ? candidate : current));
+  return <g className="portfolio-latest-labels" aria-label="Latest cumulative returns" style={{ pointerEvents: 'none' }}>{labels.map((label, index) => {
+    const box = chosen[index];
+    return <g key={label.key}>
+      <circle cx={endpointX} cy={endpointYs[index]} r={3} fill={label.color} stroke="#fff" strokeWidth={1}/>
+      <rect x={box.x} y={box.y} width={width} height={height} rx={3} fill="#fff" stroke={label.color} strokeOpacity={0.28}/>
+      <text x={box.x + 6} y={box.y + height / 2} textAnchor="start" dominantBaseline="middle" fill={label.color} fontSize={10} fontWeight={600} data-testid={`return-label-${label.key}`}>{label.title}: {percent(label.value)}</text>
+    </g>;
+  })}</g>;
 }
 
 export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: string) => void }) {
@@ -184,7 +232,7 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
       <aside className="portfolio-risk-box" aria-labelledby="portfolio-risk-title"><div className="portfolio-risk-heading"><h3 id="portfolio-risk-title">Portfolio risk & allocation</h3><span title="Daily history metrics use the full stored record, not the chart period. Annualization uses 252 trading days; ratios require 60 daily returns. Beta uses the trailing year. Missing or undefined values display —.">Since inception · daily ⓘ</span></div><dl>{riskMetrics.map(metric => <div key={metric.label} title={metric.description}><dt>{metric.label}</dt><dd>{metric.value}</dd></div>)}</dl></aside>
     </div>
     <div className="portfolio-charts">
-      <section className="portfolio-panel" aria-labelledby="portfolio-performance-title"><div className="portfolio-panel-heading"><h3 id="portfolio-performance-title">Fairfax Investing Group Select Opportunities Fund vs. S&amp;P 500</h3><div className="portfolio-period" role="group" aria-label="Return history period">{(['Lifetime returns', 'YTD', '1M', '3M'] as const).map(value => <button key={value} type="button" aria-pressed={period === value} onClick={() => setPeriod(value)}>{value}</button>)}</div></div><div className="portfolio-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={performance} margin={{ top: 6, right: 150, left: -15, bottom: 0 }}><CartesianGrid stroke="#edf1f5" vertical/><XAxis dataKey="date" tick={{ fontSize: 9, fill: '#7a8797' }} minTickGap={55} tickLine={false} axisLine={false} tickFormatter={value => formatDate(new Date(`${value}T12:00:00Z`), { month: 'short', day: 'numeric', timeZone: 'UTC' }, 'en-US')}/><YAxis padding={{ top: 24, bottom: 18 }} tickFormatter={value => `${(value * 100).toFixed(0)}%`} tick={{ fontSize: 9, fill: '#7a8797' }} tickLine={false} axisLine={false}/>{chartEvents.map(event => <ReferenceLine key={event.date} x={event.date} stroke="#91a0b2" strokeDasharray="3 3" strokeOpacity={0.65} shape={props => <line {...props}><title>{dateLabel(event.date)}: {event.title}. {event.detail}</title></line>} label={{ position: 'insideBottom', content: (props: { x?: string | number; y?: string | number }) => <g transform={`translate(${props.x ?? 0},${props.y ?? 0})`} className="portfolio-event-marker" role="button" tabIndex={0} aria-pressed={pinnedMarketEvent?.date === event.date} aria-label={`${dateLabel(event.date)}: ${event.title}. ${event.detail}`} onClick={() => { setPinnedMarketEvent(current => current?.date === event.date ? null : event); setActiveMarketEvent(null); }} onMouseEnter={() => setActiveMarketEvent(event)} onMouseLeave={() => setActiveMarketEvent(null)} onFocus={() => setActiveMarketEvent(event)} onBlur={() => setActiveMarketEvent(null)} onKeyDown={keyboardEvent => { if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') { keyboardEvent.preventDefault(); setPinnedMarketEvent(current => current?.date === event.date ? null : event); setActiveMarketEvent(null); } if (keyboardEvent.key === 'Escape') { setPinnedMarketEvent(null); setActiveMarketEvent(null); } }}><title>{dateLabel(event.date)}: {event.title}. Click to pin event details.</title><circle r={9}/><text y={3.2} textAnchor="middle">{event.number}</text></g> }} />)}<Tooltip formatter={value => percent(Number(value))} labelFormatter={label => dateLabel(String(label))} contentStyle={{ fontSize: 11, borderRadius: 6 }}/><Line name="Fund return" dataKey="club" stroke="#234d76" strokeWidth={1.8} dot={false} activeDot={{ r: 3 }} isAnimationActive={false}/><Line name="S&P 500" dataKey="benchmark" stroke="#76a68d" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} isAnimationActive={false}/><LatestReturnLabels point={performance.at(-1)}/></LineChart></ResponsiveContainer>{shownMarketEvent && <aside className="portfolio-event-card" aria-live="polite"><button type="button" className="portfolio-event-close" aria-label="Close event details" onClick={() => { setPinnedMarketEvent(null); setActiveMarketEvent(null); }}>×</button><strong>{dateLabel(shownMarketEvent.date)} · {shownMarketEvent.title}</strong><span>{shownMarketEvent.detail}</span>{shownMarketEvent.dailyMove != null && <small>S&amp;P 500: {percent(shownMarketEvent.dailyMove, true)} that day</small>}</aside>}</div></section>
+      <section className="portfolio-panel" aria-labelledby="portfolio-performance-title"><div className="portfolio-panel-heading"><h3 id="portfolio-performance-title">Fairfax Investing Group Select Opportunities Fund vs. S&amp;P 500</h3><div className="portfolio-period" role="group" aria-label="Return history period">{(['Lifetime returns', 'YTD', '1M', '3M'] as const).map(value => <button key={value} type="button" aria-pressed={period === value} onClick={() => setPeriod(value)}>{value}</button>)}</div></div><div className="portfolio-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={performance} margin={{ top: 6, right: 12, left: -15, bottom: 0 }}><CartesianGrid stroke="#edf1f5" vertical/><XAxis dataKey="date" tick={{ fontSize: 9, fill: '#7a8797' }} minTickGap={55} tickLine={false} axisLine={false} tickFormatter={value => formatDate(new Date(`${value}T12:00:00Z`), { month: 'short', day: 'numeric', timeZone: 'UTC' }, 'en-US')}/><YAxis padding={{ top: 24, bottom: 18 }} tickFormatter={value => `${(value * 100).toFixed(0)}%`} tick={{ fontSize: 9, fill: '#7a8797' }} tickLine={false} axisLine={false}/>{chartEvents.map(event => <ReferenceLine key={event.date} x={event.date} stroke="#91a0b2" strokeDasharray="3 3" strokeOpacity={0.65} shape={props => <line {...props}><title>{dateLabel(event.date)}: {event.title}. {event.detail}</title></line>} label={{ position: 'insideBottom', content: (props: { x?: string | number; y?: string | number }) => <g transform={`translate(${props.x ?? 0},${props.y ?? 0})`} className="portfolio-event-marker" role="button" tabIndex={0} aria-pressed={pinnedMarketEvent?.date === event.date} aria-label={`${dateLabel(event.date)}: ${event.title}. ${event.detail}`} onClick={() => { setPinnedMarketEvent(current => current?.date === event.date ? null : event); setActiveMarketEvent(null); }} onMouseEnter={() => setActiveMarketEvent(event)} onMouseLeave={() => setActiveMarketEvent(null)} onFocus={() => setActiveMarketEvent(event)} onBlur={() => setActiveMarketEvent(null)} onKeyDown={keyboardEvent => { if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') { keyboardEvent.preventDefault(); setPinnedMarketEvent(current => current?.date === event.date ? null : event); setActiveMarketEvent(null); } if (keyboardEvent.key === 'Escape') { setPinnedMarketEvent(null); setActiveMarketEvent(null); } }}><title>{dateLabel(event.date)}: {event.title}. Click to pin event details.</title><circle r={9}/><text y={3.2} textAnchor="middle">{event.number}</text></g> }} />)}<Tooltip formatter={value => percent(Number(value))} labelFormatter={label => dateLabel(String(label))} contentStyle={{ fontSize: 11, borderRadius: 6 }}/><Line name="Fund return" dataKey="club" stroke="#234d76" strokeWidth={1.8} dot={false} activeDot={{ r: 3 }} isAnimationActive={false}/><Line name="S&P 500" dataKey="benchmark" stroke="#76a68d" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} isAnimationActive={false}/><LatestReturnLabels data={performance}/></LineChart></ResponsiveContainer>{shownMarketEvent && <aside className="portfolio-event-card" aria-live="polite"><button type="button" className="portfolio-event-close" aria-label="Close event details" onClick={() => { setPinnedMarketEvent(null); setActiveMarketEvent(null); }}>×</button><strong>{dateLabel(shownMarketEvent.date)} · {shownMarketEvent.title}</strong><span>{shownMarketEvent.detail}</span>{shownMarketEvent.dailyMove != null && <small>S&amp;P 500: {percent(shownMarketEvent.dailyMove, true)} that day</small>}</aside>}</div></section>
       <PortfolioAllocation holdings={portfolio.holdings} cash={summary.cash} asOf={portfolio.asOf}/>
     </div>
     <section className="portfolio-panel portfolio-holdings" aria-labelledby="portfolio-holdings-title"><div className="portfolio-panel-heading"><h3 id="portfolio-holdings-title">Portfolio holdings</h3><span>{portfolio.holdings.length} positions · USD</span></div><div className="portfolio-table-scroll"><table className="portfolio-table"><caption className="sr-only">Holdings, original purchase dates and cost from the supplied workbook, with automatically updated closing prices and returns.</caption><thead><tr><th>Ticker</th><th>Company</th><th>Date added</th><th>Prc</th><th>Avg. cost</th><th>Shrs</th><th>Cost</th><th aria-sort={sort?.key === 'marketValue' ? sort.descending ? 'descending' : 'ascending' : 'none'}><button onClick={() => sortBy('marketValue')}>Mkt Val{sortLabel('marketValue')}</button></th><th aria-sort={sort.key === 'gain' ? sort.descending ? 'descending' : 'ascending' : 'none'}><button onClick={() => sortBy('gain')}>G/L{sortLabel('gain')}</button></th><th aria-sort={sort?.key === 'return' ? sort.descending ? 'descending' : 'ascending' : 'none'}><button onClick={() => sortBy('return')}>Return{sortLabel('return')}</button></th><th>Day %</th><th>Weight</th><th title={betaDescription}>Beta</th><th title="Yahoo Finance trailing P/E ratio">P/E</th><th title="Yahoo Finance forward P/E ratio">Fwd P/E</th><th title="Yahoo Finance PEG ratio">PEG</th><th title="Trailing free cash flow divided by market capitalization">FCF Yld</th><th title="Annualized Jensen alpha versus the S&amp;P 500, using a 0% risk-free rate">Alpha</th><th title="Annualized standard deviation of trailing 1-year daily adjusted returns">SD</th><th>52W H</th><th>52W L</th><th className="portfolio-history-cell">Last 90 days</th></tr></thead><tbody>{holdings.map(holding => <tr key={holding.ticker}><th scope="row"><button className="portfolio-ticker" onClick={() => onStudy(holding.ticker)} title={`Analyze ${holding.name}`}>{holding.ticker}</button></th><td className="portfolio-company-name" title={holding.name}>{holding.name}</td><td className="portfolio-purchase-date"><time dateTime={holding.purchaseDate}>{dateLabel(holding.purchaseDate)}</time>{holding.purchaseNote && <small>{holding.purchaseNote}</small>}</td><td>{currency(holding.price)}</td><td>{currency(holding.averageCost)}</td><td>{holding.shares}</td><td>{currency(holding.cost)}</td><td>{currency(holding.marketValue)}</td><td className={changeClass(holding.gain)}>{currency(holding.gain)}</td><td className={changeClass(holding.return)}>{percent(holding.return)}</td><td className={changeClass(holding.dayChange)}>{percent(holding.dayChange)}</td><td>{percent(holding.weight)}</td><td title={betaDescription}>{betaLabel(holding.beta)}</td><td>{betaLabel(holding.trailingPE)}</td><td>{betaLabel(holding.forwardPE)}</td><td>{betaLabel(holding.pegRatio)}</td><td>{holding.freeCashFlowYield == null ? '—' : percent(holding.freeCashFlowYield)}</td><td className={changeClass(holding.alpha ?? 0)}>{holding.alpha == null ? '—' : percent(holding.alpha, true)}</td><td>{holding.standardDeviation == null ? '—' : percent(holding.standardDeviation)}</td><td>{currency(holding.high52)}</td><td>{currency(holding.low52)}</td><td className="portfolio-history-cell"><Sparkline history={holding.history} name={holding.ticker} stretch/></td></tr>)}</tbody><tfoot><tr><th scope="row" colSpan={6}>Holdings total</th><td>{currency(summary.totalCost)}</td><td>{currency(summary.holdingsValue)}</td><td className={changeClass(summary.gain)}>{currency(summary.gain)}</td><td className={changeClass(summary.portfolioReturn)}>{percent(summary.portfolioReturn)}</td><td className={dailyChange == null ? '' : changeClass(dailyChange)} title="Portfolio change from the previous close, including cash held constant" data-testid="portfolio-day-change">{dailyChange == null ? '—' : percent(dailyChange, true)}</td><td>100.00%</td><td colSpan={7}/><td colSpan={3}/></tr></tfoot></table></div><p className="portfolio-table-note">Dates and “avg down” notes follow the workbook. Weight is each holding’s share of invested market value; cash is excluded. Beta, Alpha, and SD use trailing 1-year daily adjusted returns versus the S&amp;P 500; Alpha is annualized with a 0% risk-free rate. P/E, Fwd P/E, and PEG use Yahoo Finance valuation metrics; FCF Yld is trailing free cash flow divided by market capitalization. — indicates unavailable data. Portfolio beta and total Day change include cash. Sharpe is annualized from stored fund-return history since inception with an assumed 0% risk-free rate.</p></section>
