@@ -123,11 +123,12 @@ export default function PortfolioDashboard({ onStudy }: { onStudy: (ticker: stri
     const update = async () => {
       if (document.hidden) return;
       controller?.abort();
-      controller = new AbortController();
+      const requestController = new AbortController();
+      controller = requestController;
       try {
         const candidates = await Promise.all(['/api/portfolio', '/portfolio-current.json'].map(async source => {
           try {
-            const response = await fetch(source.startsWith('/api/') ? apiUrl(source) : source, { signal: controller.signal, cache: 'no-store' });
+            const response = await fetch(source.startsWith('/api/') ? apiUrl(source) : source, { signal: requestController.signal, cache: 'no-store' });
             if (!response.ok) return null;
             const candidate = await response.json() as Portfolio;
             if (typeof candidate.asOf !== 'string' || !Array.isArray(candidate.holdings) || !Array.isArray(candidate.performance) || typeof candidate.summary?.portfolioValue !== 'number') return null;
